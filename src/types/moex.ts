@@ -140,3 +140,9 @@ export interface MarketPrice {
   updatedAt?: string | null
   source: 'LAST' | 'MARKETPRICE' | 'SETTLEPRICE' | 'PREVPRICE' | 'unavailable'
 }
+
+export interface InstrumentSpecification extends MarketPrice {
+  minStep: number
+  stepPrice: number
+  lotSize: number
+}

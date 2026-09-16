@@ -1,4 +1,4 @@
-import type { MarketPrice } from '@/types/moex'
+import type { InstrumentSpecification, InstrumentType, MarketPrice } from '@/types/moex'
 
 import { queryString, requestJson } from './http'
 
@@ -77,5 +77,36 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
     price: source ? finiteNumber(row[source]) : null,
     updatedAt: typeof row.UPDATETIME === 'string' ? row.UPDATETIME : null,
     source: source ?? 'unavailable',
+  }
+}
+
+export async function getInstrumentSpecification(
+  secid: string,
+  type: Extract<InstrumentType, 'futures' | 'share'>,
+): Promise<InstrumentSpecification> {
+  const market = type === 'futures' ? 'futures/markets/forts' : 'stock/markets/shares'
+  const columns = 'SECID,LAST,MARKETPRICE,SETTLEPRICE,PREVPRICE,UPDATETIME'
+  const response = await requestJson<IssSecurityResponse>(
+    `/moex-iss/engines/${market}/securities/${encodeURIComponent(secid)}.json${queryString({
+      'iss.meta': 'off',
+      'iss.only': 'marketdata,securities',
+      'marketdata.columns': columns,
+      'securities.columns': 'SECID,MINSTEP,STEPPRICE,LOTSIZE',
+    })}`,
+    { retries: 2 },
+  )
+  const marketRow = bestPriceRow(rows(response.marketdata)) ?? {}
+  const securityRow = rows(response.securities)[0] ?? {}
+  const source = (['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'] as const).find(
+    (field) => finiteNumber(marketRow[field]) !== null,
+  )
+  return {
+    secid,
+    price: source ? finiteNumber(marketRow[source]) : null,
+    updatedAt: typeof marketRow.UPDATETIME === 'string' ? marketRow.UPDATETIME : null,
+    source: source ?? 'unavailable',
+    minStep: finiteNumber(securityRow.MINSTEP) ?? 1,
+    stepPrice: finiteNumber(securityRow.STEPPRICE) ?? 1,
+    lotSize: finiteNumber(securityRow.LOTSIZE) ?? 1,
   }
 }

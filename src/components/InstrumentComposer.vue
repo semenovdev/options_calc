@@ -6,6 +6,7 @@ import { getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type { Asset, Future, InstrumentType, OptionBoardRow, OptionSeries } from '@/types/moex'
+import type { Position } from '@/types/portfolio'
 import { formatNumber, todayMoscow } from '@/utils/format'
 import {
   isLiquidOption,
@@ -37,6 +38,7 @@ const volatility = ref<number | undefined>()
 const instrumentFilter = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
+const pendingPositions = ref<Omit<Position, 'id'>[]>([])
 let searchTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 let instrumentRequestId = 0
 
@@ -110,6 +112,7 @@ watch(selectedSeriesCode, async (code) => {
   const requestId = instrumentRequestId
   loading.value = true
   error.value = null
+  pendingPositions.value = []
   try {
     board.value = await optionCalcApi.getOptionBoard(
       asset.value.asset_code,
@@ -183,13 +186,9 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
     if (type === 'option') {
       const result = await optionCalcApi.getSeries(asset.value.asset_code, asset.value.asset_type)
       if (requestId !== instrumentRequestId) return
-      series.value = result
+      series.value = result.filter((item) => item.expiration_date >= todayMoscow())
       series.value.sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
-      const today = todayMoscow()
-      selectedSeriesCode.value =
-        series.value.find((item) => item.expiration_date >= today)?.optionseries_code ??
-        series.value[0]?.optionseries_code ??
-        ''
+      selectedSeriesCode.value = series.value[0]?.optionseries_code ?? ''
     } else if (type === 'futures') {
       const result = await optionCalcApi.getFutures(asset.value.asset_code)
       if (requestId !== instrumentRequestId) return
@@ -238,19 +237,9 @@ function liquidityText(option: OptionBoardRow): string {
 
 function add(): void {
   if (!asset.value || !canAdd.value) return
-  let strategy = store.activeStrategy
-  if (strategy && strategy.positions.length && strategy.assetCode !== asset.value.asset_code) {
-    store.addStrategy()
-    strategy = store.activeStrategy
-  }
-  if (!strategy) return
-  strategy.assetCode = asset.value.asset_code
-  strategy.assetType = asset.value.asset_type
-  strategy.marketPrice = null
-
   const option = selectedOption.value
   const future = selectedFuture.value
-  store.addPosition({
+  pendingPositions.value.push({
     secid: selectedSecid.value,
     type: instrumentType.value,
     quantity: quantity.value,
@@ -263,6 +252,24 @@ function add(): void {
     optionType: option?.option_type,
     title: asset.value.title,
   })
+  selectedSecid.value = instrumentType.value === 'share' ? asset.value.asset_code : ''
+  price.value = undefined
+  volatility.value = undefined
+}
+
+function finish(): void {
+  if (!asset.value || !pendingPositions.value.length) return
+  let strategy = store.activeStrategy
+  if (strategy && strategy.positions.length && strategy.assetCode !== asset.value.asset_code) {
+    store.addStrategy()
+    strategy = store.activeStrategy
+  }
+  if (!strategy) return
+  strategy.assetCode = asset.value.asset_code
+  strategy.assetType = asset.value.asset_type
+  strategy.marketPrice = null
+
+  pendingPositions.value.forEach((position) => store.addPosition(position))
   close()
   void store.calculate()
 }
@@ -449,9 +456,19 @@ function add(): void {
 
           <div v-if="error" class="dialog-error">{{ error }}</div>
           <footer v-if="step === 'instrument'" class="dialog-footer">
+            <span v-if="pendingPositions.length" class="pending-count">
+              В наборе: {{ pendingPositions.length }}
+            </span>
             <button class="secondary-button" @click="step = 'asset'">Назад</button>
             <button class="primary-button" :disabled="!canAdd || loading" @click="add">
               Добавить позицию
+            </button>
+            <button
+              class="secondary-button done-button"
+              :disabled="!pendingPositions.length || loading"
+              @click="finish"
+            >
+              Готово
             </button>
           </footer>
         </section>

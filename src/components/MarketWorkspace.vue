@@ -198,14 +198,12 @@ async function loadMarketData(): Promise<void> {
   loadingMarket.value = true
   marketError.value = null
   try {
-    series.value = await optionCalcApi.getSeries(strategy.assetCode, strategy.assetType)
+    series.value = (await optionCalcApi.getSeries(strategy.assetCode, strategy.assetType)).filter(
+      (item) => item.expiration_date >= todayMoscow(),
+    )
     series.value.sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
     if (!series.value.some((item) => item.optionseries_code === selectedSeriesCode.value)) {
-      const today = todayMoscow()
-      selectedSeriesCode.value =
-        series.value.find((item) => item.expiration_date >= today)?.optionseries_code ??
-        series.value[0]?.optionseries_code ??
-        ''
+      selectedSeriesCode.value = series.value[0]?.optionseries_code ?? ''
     }
     try {
       strategy.marketPrice = (await getMarketPrice(strategy.assetCode)).price

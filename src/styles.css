@@ -843,6 +843,17 @@ th {
   padding: 13px 20px;
   border-top: 1px solid var(--border);
 }
+.pending-count {
+  align-self: center;
+  margin-right: auto;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.done-button:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .search-field {
   display: flex;
   align-items: center;

@@ -26,18 +26,21 @@ export const optionCalcApi = {
   getFutures(assetCode: string, expirationDate?: string) {
     return requestJson<Future[]>(
       `${BASE}/assets/${encodeURIComponent(assetCode)}/futures${queryString({ expiration_date: expirationDate })}`,
+      { retries: 2 },
     )
   },
 
   getSeries(assetCode: string, assetType?: AssetType) {
     return requestJson<OptionSeries[]>(
       `${BASE}/assets/${encodeURIComponent(assetCode)}/optionseries${queryString({ asset_type: assetType })}`,
+      { retries: 2 },
     )
   },
 
   getOptionBoard(assetCode: string, seriesCode: string, assetType?: AssetType) {
     return requestJson<OptionBoardResponse>(
       `${BASE}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/optionboard${queryString({ asset_type: assetType })}`,
+      { retries: 2 },
     ).then((board): OptionBoardRow[] => [
       ...board.call.map((row) => ({ ...row, option_type: 'call' as const })),
       ...board.put.map((row) => ({ ...row, option_type: 'put' as const })),
@@ -47,6 +50,7 @@ export const optionCalcApi = {
   getVolatilityGraph(assetCode: string, seriesCode: string, assetType?: AssetType) {
     return requestJson<VolatilityPoint[]>(
       `${BASE}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/volatility_graph${queryString({ asset_type: assetType })}`,
+      { retries: 2 },
     )
   },
 
@@ -55,6 +59,7 @@ export const optionCalcApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      retries: 2,
     })
   },
 
@@ -63,6 +68,7 @@ export const optionCalcApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      retries: 2,
     })
   },
 }

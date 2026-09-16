@@ -1,10 +1,12 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
+import { getInstrumentSpecification } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
-import type { IndicatorType } from '@/types/moex'
+import type { CalculatedPortfolio, IndicatorGraph, IndicatorType } from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
+import { addLinearPositionsToGraph, linearMultiplier, linearPnl } from '@/utils/linearPnl'
 import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
 
 const STORAGE_KEY = 'moex-options-workbench:v1'
@@ -49,6 +51,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     error: null,
     calculatedAt: null,
   })
+  let calculationRequestId = 0
 
   const activeStrategy = computed(() =>
     strategies.value.find((strategy) => strategy.id === activeId.value),
@@ -68,6 +71,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   )
 
   function resetCalculation(): void {
+    calculationRequestId += 1
     calculation.portfolio = null
     calculation.graphs = {}
     calculation.error = null
@@ -96,6 +100,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   function addPosition(position: Omit<Position, 'id'>): void {
     const strategy = activeStrategy.value
     if (!strategy) return
+    focusedPositionId.value = null
     const existingIndex = strategy.positions.findIndex(
       (item) => item.secid === position.secid && item.type === position.type,
     )
@@ -126,24 +131,93 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   async function calculate(): Promise<void> {
     const strategy = activeStrategy.value
     if (!strategy?.positions.length) return
+    const requestId = ++calculationRequestId
     calculation.loading = true
     calculation.error = null
     const selectedPositions = focusedPosition.value ? [focusedPosition.value] : strategy.positions
-    const payload = toPortfolioRequest(strategy, selectedPositions)
+    const optionPositions = selectedPositions.filter((position) => position.type === 'option')
+    const linearPositions = selectedPositions.filter(
+      (position): position is Position & { type: 'futures' | 'share' } =>
+        position.type === 'futures' || position.type === 'share',
+    )
     try {
-      const [portfolio, ...graphs] = await Promise.all([
-        optionCalcApi.calculatePortfolio(payload),
-        ...indicators.map((indicator) => optionCalcApi.getPortfolioGraph(indicator, payload)),
+      const linear = await Promise.all(
+        linearPositions.map(async (position) => ({
+          position,
+          specification: await getInstrumentSpecification(position.secid, position.type),
+        })),
+      )
+      const optionPayload = toPortfolioRequest(strategy, optionPositions)
+      const [fullPortfolioResult, optionResults] = await Promise.all([
+        optionCalcApi
+          .calculatePortfolio(toPortfolioRequest(strategy, selectedPositions))
+          .then((value) => ({ value }))
+          .catch(() => ({ value: null })),
+        optionPositions.length
+          ? Promise.all([
+              optionCalcApi.calculatePortfolio(optionPayload),
+              ...indicators.map((indicator) =>
+                optionCalcApi.getPortfolioGraph(indicator, optionPayload),
+              ),
+            ])
+          : Promise.resolve([]),
       ])
-      calculation.portfolio = portfolio
+      const fullPortfolio = fullPortfolioResult.value
+      const optionPortfolio = optionResults[0] as CalculatedPortfolio | undefined
+      const optionGraphs = optionResults.slice(1) as IndicatorGraph[]
+      const linearPnlNow = linear.reduce(
+        (total, item) =>
+          total + linearPnl(item, item.specification.price ?? item.position.price ?? 0),
+        0,
+      )
+      const linearDelta = linear.reduce(
+        (total, item) => total + item.position.quantity * linearMultiplier(item),
+        0,
+      )
+      const totals = { ...(optionPortfolio?.total ?? {}) }
+      totals.profit_and_loss = (totals.profit_and_loss ?? 0) + linearPnlNow
+      totals.profit_and_loss_rub = (totals.profit_and_loss_rub ?? 0) + linearPnlNow
+      totals.delta = (totals.delta ?? 0) + linearDelta
+      if (requestId !== calculationRequestId) return
+      calculation.portfolio = {
+        positions: [
+          ...(optionPortfolio?.positions ?? []),
+          ...linear.map(({ position, specification }) => ({
+            secid: position.secid,
+            type: position.type,
+            quantity: position.quantity,
+            price: position.price,
+            profit_and_loss: linearPnl(
+              { position, specification },
+              specification.price ?? position.price ?? 0,
+            ),
+            profit_and_loss_rub: linearPnl(
+              { position, specification },
+              specification.price ?? position.price ?? 0,
+            ),
+            delta: position.quantity * linearMultiplier({ position, specification }),
+          })),
+        ],
+        total: totals,
+        initial_margin: fullPortfolio?.initial_margin,
+      }
+      const spot =
+        strategy.marketPrice ??
+        linear.find((item) => item.specification.price !== null)?.specification.price ??
+        selectedPositions.find((position) => position.price !== undefined)?.price ??
+        100
       calculation.graphs = Object.fromEntries(
-        indicators.map((indicator, index) => [indicator, graphs[index]]),
+        indicators.map((indicator, index) => [
+          indicator,
+          addLinearPositionsToGraph(optionGraphs[index], linear, indicator, spot),
+        ]),
       )
       calculation.calculatedAt = new Date().toISOString()
     } catch (error) {
+      if (requestId !== calculationRequestId) return
       calculation.error = error instanceof Error ? error.message : 'Не удалось рассчитать портфель'
     } finally {
-      calculation.loading = false
+      if (requestId === calculationRequestId) calculation.loading = false
     }
   }
 
