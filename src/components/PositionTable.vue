@@ -31,6 +31,13 @@ function focusPosition(id: string): void {
   store.focusedPositionId = store.focusedPositionId === id ? null : id
   void store.calculate()
 }
+
+function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis.Event): void {
+  const value = Number((event.target as globalThis.HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  store.updatePosition(id, { [field]: value })
+  void store.calculate()
+}
 </script>
 
 <template>
@@ -82,11 +89,7 @@ function focusPosition(id: string): void {
                 type="number"
                 :value="position.quantity"
                 @click.stop
-                @change="
-                  store.updatePosition(position.id, {
-                    quantity: Number(($event.target as HTMLInputElement).value),
-                  })
-                "
+                @change="updateNumber(position.id, 'quantity', $event)"
               />
             </td>
             <td class="numeric">
@@ -96,11 +99,7 @@ function focusPosition(id: string): void {
                 step="any"
                 :value="position.price"
                 @click.stop
-                @change="
-                  store.updatePosition(position.id, {
-                    price: Number(($event.target as HTMLInputElement).value),
-                  })
-                "
+                @change="updateNumber(position.id, 'price', $event)"
               />
             </td>
             <td class="numeric theor-price">

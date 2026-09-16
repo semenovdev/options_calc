@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Activity, Download, FileJson, Plus, RefreshCw, Wifi } from '@lucide/vue'
 
 import InstrumentComposer from '@/components/InstrumentComposer.vue'
@@ -13,6 +13,14 @@ import { exportStrategyCsv, exportStrategyJson } from '@/utils/export'
 const store = usePortfolioStore()
 const composerOpen = ref(false)
 const hasPositions = computed(() => Boolean(store.activeStrategy?.positions.length))
+
+watch(
+  () => store.activeId,
+  () => {
+    if (store.activeStrategy?.positions.length) void store.calculate()
+  },
+  { immediate: true, flush: 'post' },
+)
 </script>
 
 <template>
