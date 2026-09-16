@@ -7,6 +7,7 @@ import type { CalculatedPortfolio, IndicatorGraph, IndicatorType } from '@/types
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
 import { addLinearPositionsToGraph, linearMultiplier, linearPnl } from '@/utils/linearPnl'
+import { indicatorValueAt } from '@/utils/options'
 import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
 
 const STORAGE_KEY = 'moex-options-workbench:v1'
@@ -148,14 +149,19 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         })),
       )
       const optionPayload = toPortfolioRequest(strategy, optionPositions)
+      const currentPortfolioPayload = {
+        ...toPortfolioRequest(strategy, selectedPositions),
+        what_if: undefined,
+      }
+      const currentOptionPayload = { ...optionPayload, what_if: undefined }
       const [fullPortfolioResult, optionResults] = await Promise.all([
         optionCalcApi
-          .calculatePortfolio(toPortfolioRequest(strategy, selectedPositions))
+          .calculatePortfolio(currentPortfolioPayload)
           .then((value) => ({ value }))
           .catch(() => ({ value: null })),
         optionPositions.length
           ? Promise.all([
-              optionCalcApi.calculatePortfolio(optionPayload),
+              optionCalcApi.calculatePortfolio(currentOptionPayload),
               ...indicators.map((indicator) =>
                 optionCalcApi.getPortfolioGraph(indicator, optionPayload),
               ),
@@ -178,6 +184,28 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       totals.profit_and_loss = (totals.profit_and_loss ?? 0) + linearPnlNow
       totals.profit_and_loss_rub = (totals.profit_and_loss_rub ?? 0) + linearPnlNow
       totals.delta = (totals.delta ?? 0) + linearDelta
+      const spot =
+        strategy.marketPrice ??
+        linear.find((item) => item.specification.price !== null)?.specification.price ??
+        selectedPositions.find((position) => position.price !== undefined)?.price ??
+        100
+      const graphs = Object.fromEntries(
+        indicators.map((indicator, index) => [
+          indicator,
+          addLinearPositionsToGraph(optionGraphs[index], linear, indicator, spot),
+        ]),
+      ) as Record<IndicatorType, IndicatorGraph>
+      const hasScenario =
+        Boolean(strategy.volatilityShift) || strategy.calculationDate !== todayMoscow()
+      if (hasScenario) {
+        indicators.forEach((indicator) => {
+          const points = graphs[indicator].on_what_if
+          const value = points ? indicatorValueAt(points, spot) : null
+          if (value === null) return
+          totals[indicator] = value
+          if (indicator === 'profit_and_loss') totals.profit_and_loss_rub = value
+        })
+      }
       if (requestId !== calculationRequestId) return
       calculation.portfolio = {
         positions: [
@@ -201,17 +229,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         total: totals,
         initial_margin: fullPortfolio?.initial_margin,
       }
-      const spot =
-        strategy.marketPrice ??
-        linear.find((item) => item.specification.price !== null)?.specification.price ??
-        selectedPositions.find((position) => position.price !== undefined)?.price ??
-        100
-      calculation.graphs = Object.fromEntries(
-        indicators.map((indicator, index) => [
-          indicator,
-          addLinearPositionsToGraph(optionGraphs[index], linear, indicator, spot),
-        ]),
-      )
+      calculation.graphs = graphs
       calculation.calculatedAt = new Date().toISOString()
     } catch (error) {
       if (requestId !== calculationRequestId) return

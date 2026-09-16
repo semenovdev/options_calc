@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { interpolateIndicator, isLiquidOption, niceAxisStep, optionsAroundPrice } from './options'
+import {
+  indicatorValueAt,
+  interpolateIndicator,
+  isLiquidOption,
+  niceAxisStep,
+  optionsAroundPrice,
+} from './options'
 
 describe('option helpers', () => {
   it('accepts only options with a tradable two-sided spread', () => {
@@ -28,5 +34,17 @@ describe('option helpers', () => {
     ]
     const result = interpolateIndicator(points, 90, 120, 4)
     expect(result.map((point) => point.value)).toEqual([1, 1, 11, 11])
+  })
+
+  it('interpolates a scenario value at the current market price', () => {
+    expect(
+      indicatorValueAt(
+        [
+          { underlying_price: 100, value: -10 },
+          { underlying_price: 120, value: 30 },
+        ],
+        110,
+      ),
+    ).toBe(10)
   })
 })

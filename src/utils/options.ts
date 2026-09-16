@@ -67,3 +67,8 @@ export function interpolateIndicator(
     return { underlying_price: price, value: left.value + (right.value - left.value) * ratio }
   })
 }
+
+export function indicatorValueAt(points: IndicatorPoint[], price: number): number | null {
+  if (!points.length || !Number.isFinite(price)) return null
+  return interpolateIndicator(points, price, price + 1, 2)[0]?.value ?? null
+}
