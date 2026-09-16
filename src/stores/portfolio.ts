@@ -5,7 +5,7 @@ import { optionCalcApi } from '@/api/optionCalc'
 import type { IndicatorType } from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
-import { createId, toPortfolioRequest } from '@/utils/portfolio'
+import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
 
 const STORAGE_KEY = 'moex-options-workbench:v1'
 const indicators: IndicatorType[] = ['profit_and_loss', 'delta', 'gamma', 'vega', 'theta', 'rho']
@@ -94,7 +94,18 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   }
 
   function addPosition(position: Omit<Position, 'id'>): void {
-    activeStrategy.value?.positions.push({ ...position, id: createId('position') })
+    const strategy = activeStrategy.value
+    if (!strategy) return
+    const existingIndex = strategy.positions.findIndex(
+      (item) => item.secid === position.secid && item.type === position.type,
+    )
+    if (existingIndex === -1) {
+      strategy.positions.push({ ...position, id: createId('position') })
+    } else {
+      const merged = mergePosition(strategy.positions[existingIndex]!, position)
+      if (merged) strategy.positions[existingIndex] = merged
+      else strategy.positions.splice(existingIndex, 1)
+    }
     resetCalculation()
   }
 

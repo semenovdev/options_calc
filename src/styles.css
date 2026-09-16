@@ -548,8 +548,16 @@ th {
 }
 .indicator-switcher {
   display: flex;
+  align-items: center;
   gap: 3px;
   padding: 10px 14px 0;
+}
+.indicator-caption {
+  margin-right: 4px;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 .indicator-switcher button {
   min-width: 47px;
@@ -563,6 +571,19 @@ th {
 .indicator-switcher button.active {
   background: var(--panel-3);
   color: var(--green);
+}
+.underlying-price-chip {
+  margin-left: auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(240, 180, 77, 0.3);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.underlying-price-chip strong {
+  margin-left: 4px;
+  color: var(--amber);
+  font-family: 'IBM Plex Mono', monospace;
 }
 .chart-frame {
   width: 100%;
@@ -782,7 +803,8 @@ th {
 }
 .composer-dialog {
   width: min(680px, 100%);
-  max-height: min(760px, calc(100vh - 40px));
+  height: min(760px, calc(100vh - 40px));
+  max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -804,9 +826,15 @@ th {
   font-size: 16px;
 }
 .dialog-body {
-  min-height: 330px;
+  flex: 1;
+  min-height: 0;
   padding: 20px;
   overflow: auto;
+}
+.dialog-body.instrument-step {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .dialog-footer {
   display: flex;
@@ -845,6 +873,8 @@ th {
   display: grid;
   gap: 4px;
   margin-top: 10px;
+  max-height: calc(100% - 58px);
+  overflow-y: auto;
 }
 .asset-results button,
 .option-list button {
@@ -858,7 +888,7 @@ th {
 .asset-results button {
   min-height: 53px;
   display: grid;
-  grid-template-columns: 58px 1fr;
+  grid-template-columns: minmax(116px, 145px) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -872,6 +902,12 @@ th {
     600 12px 'IBM Plex Mono',
     monospace;
   color: var(--green);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.asset-results button > span:last-child {
+  min-width: 0;
 }
 .asset-results strong,
 .asset-results small,
@@ -881,6 +917,9 @@ th {
 }
 .asset-results strong {
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .asset-results small,
 .option-list small {
@@ -921,23 +960,96 @@ th {
   cursor: not-allowed;
 }
 .instrument-picker {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 190px 1fr;
+  grid-template-columns: minmax(190px, 1.2fr) minmax(180px, 1fr);
+  grid-template-rows: auto auto auto minmax(150px, 1fr);
   gap: 10px;
 }
-.instrument-picker .option-list {
+.instrument-picker .strike-window-controls,
+.instrument-picker .option-list,
+.instrument-picker .search-field {
   grid-column: 1 / -1;
 }
-.option-list {
-  max-height: 250px;
+.option-side-control {
   display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  align-self: end;
+  height: 33px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #0b0f14;
+}
+.option-side-control button {
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font:
+    600 10px 'IBM Plex Mono',
+    monospace;
+}
+.option-side-control button.active {
+  background: var(--panel-3);
+  color: var(--green);
+}
+.strike-window-controls {
+  display: grid;
+  grid-template-columns: 1fr minmax(160px, 200px);
+  align-items: end;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #0d1117;
+}
+.strike-window-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.strike-window-controls input {
+  width: 100%;
+  height: 27px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--text);
+}
+.spot-indicator {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.spot-indicator strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--amber);
+  font:
+    600 14px 'IBM Plex Mono',
+    monospace;
+}
+.option-list {
+  min-height: 0;
+  max-height: 100%;
+  display: grid;
+  align-content: start;
   gap: 3px;
   overflow: auto;
 }
 .option-list button {
   min-height: 44px;
   display: grid;
-  grid-template-columns: 1fr auto 22px;
+  grid-template-columns: minmax(92px, 110px) minmax(100px, 1fr) minmax(150px, 190px) 22px;
   align-items: center;
   gap: 10px;
   padding: 6px 9px;
@@ -954,14 +1066,81 @@ th {
     600 10px 'IBM Plex Mono',
     monospace;
 }
+.strike-list button {
+  min-height: 56px;
+}
+.strike-primary strong {
+  color: var(--text);
+  font-size: 15px;
+}
+.strike-primary small {
+  font-size: 8px;
+}
+.liquidity-mark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.liquidity-mark i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 7px rgba(69, 210, 164, 0.5);
+}
+.liquidity-mark.theoretical i {
+  background: var(--amber);
+  box-shadow: 0 0 7px rgba(240, 180, 77, 0.4);
+}
+.liquidity-mark.theoretical small {
+  color: #c9aa72;
+}
+.fallback-notice {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 10px;
+  border: 1px solid rgba(240, 180, 77, 0.24);
+  border-radius: 4px;
+  background: #1d1b16;
+  color: #d5b77f;
+  font-size: 9px;
+}
+.liquidity-mark small {
+  margin: 0;
+  color: #9fbaaf;
+}
+.empty-options {
+  padding: 30px 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+}
 .quote {
   text-align: right;
 }
 .futures-list {
-  min-height: 230px;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }
 .futures-list button {
-  grid-template-columns: 1fr 22px;
+  min-height: 58px;
+  grid-template-columns: 1fr auto 22px;
+  padding: 9px 11px;
+  border-color: var(--border);
+  background: #0d1117;
+}
+.future-contract strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.future-selected {
+  color: var(--green);
+  font:
+    500 10px 'IBM Plex Mono',
+    monospace;
 }
 .selected-share {
   min-height: 150px;
@@ -975,6 +1154,7 @@ th {
     monospace;
 }
 .order-fields {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
@@ -1095,9 +1275,18 @@ th {
   }
   .instrument-picker {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto minmax(160px, 1fr);
   }
-  .instrument-picker .option-list {
+  .instrument-picker .option-list,
+  .instrument-picker .strike-window-controls,
+  .instrument-picker .search-field {
     grid-column: 1;
+  }
+  .strike-window-controls {
+    grid-template-columns: 1fr minmax(130px, 160px);
+  }
+  .option-list button {
+    grid-template-columns: 82px minmax(90px, 1fr) minmax(125px, 150px) 18px;
   }
   .order-fields {
     grid-template-columns: 1fr;

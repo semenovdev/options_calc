@@ -8,6 +8,12 @@ import { formatNumber } from '@/utils/format'
 defineEmits<{ add: [] }>()
 const store = usePortfolioStore()
 const positions = computed(() => store.activeStrategy?.positions ?? [])
+const calculatedBySecid = computed(
+  () =>
+    new Map(
+      (store.calculation.portfolio?.positions ?? []).map((position) => [position.secid, position]),
+    ),
+)
 
 function typeLabel(type: string): string {
   return (
@@ -48,6 +54,7 @@ function focusPosition(id: string): void {
             <th>Экспирация</th>
             <th class="numeric">Кол-во</th>
             <th class="numeric">Цена</th>
+            <th class="numeric">Расч. цена</th>
             <th class="numeric">IV</th>
             <th></th>
           </tr>
@@ -82,7 +89,23 @@ function focusPosition(id: string): void {
                 "
               />
             </td>
-            <td class="numeric">{{ formatNumber(position.price) }}</td>
+            <td class="numeric">
+              <input
+                class="cell-input price"
+                type="number"
+                step="any"
+                :value="position.price"
+                @click.stop
+                @change="
+                  store.updatePosition(position.id, {
+                    price: Number(($event.target as HTMLInputElement).value),
+                  })
+                "
+              />
+            </td>
+            <td class="numeric theor-price">
+              {{ formatNumber(calculatedBySecid.get(position.secid)?.theorprice) }}
+            </td>
             <td class="numeric">
               {{ position.volatility ? `${formatNumber(position.volatility)}%` : '—' }}
             </td>

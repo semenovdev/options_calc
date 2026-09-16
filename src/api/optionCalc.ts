@@ -18,7 +18,9 @@ const BASE = '/moex-option-calc'
 
 export const optionCalcApi = {
   searchAssets(query: string, assetType?: AssetType) {
-    return requestJson<Asset[]>(`${BASE}/assets${queryString({ query, asset_type: assetType })}`)
+    return requestJson<Asset[]>(`${BASE}/assets${queryString({ query, asset_type: assetType })}`, {
+      retries: 2,
+    })
   },
 
   getFutures(assetCode: string, expirationDate?: string) {

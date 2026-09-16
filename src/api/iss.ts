@@ -20,8 +20,19 @@ function rows(block?: IssBlock): Record<string, unknown>[] {
 }
 
 function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function hasPrice(row: Record<string, unknown>): boolean {
+  return ['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'].some(
+    (field) => finiteNumber(row[field]) !== null,
+  )
+}
+
+function bestPriceRow(items: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  return items.find((row) => finiteNumber(row.LAST) !== null) ?? items.find(hasPrice)
 }
 
 export async function getMarketPrice(secid: string): Promise<MarketPrice> {
@@ -34,7 +45,31 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
       'securities.columns': columns,
     })}`,
   )
-  const row = rows(response.marketdata)[0] ?? rows(response.securities)[0] ?? {}
+  let row = bestPriceRow([...rows(response.marketdata), ...rows(response.securities)]) ?? {}
+  if (!hasPrice(row)) {
+    const futuresResponse = await requestJson<IssSecurityResponse>(
+      `/moex-iss/engines/futures/markets/forts/securities/${encodeURIComponent(secid)}.json${queryString(
+        {
+          'iss.meta': 'off',
+          'iss.only': 'marketdata',
+          'marketdata.columns': columns,
+        },
+      )}`,
+    )
+    row = bestPriceRow(rows(futuresResponse.marketdata)) ?? row
+  }
+  if (!hasPrice(row)) {
+    const sharesResponse = await requestJson<IssSecurityResponse>(
+      `/moex-iss/engines/stock/markets/shares/securities/${encodeURIComponent(secid)}.json${queryString(
+        {
+          'iss.meta': 'off',
+          'iss.only': 'marketdata',
+          'marketdata.columns': columns,
+        },
+      )}`,
+    )
+    row = bestPriceRow(rows(sharesResponse.marketdata)) ?? row
+  }
   const candidates = ['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'] as const
   const source = candidates.find((field) => finiteNumber(row[field]) !== null)
   return {

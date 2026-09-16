@@ -11,7 +11,9 @@ export interface Asset {
 }
 
 export interface Future {
-  secid: string
+  futures_code: string
+  asset_code?: string
+  asset_type?: AssetType
   shortname?: string
   expiration_date?: string
   last?: number | null

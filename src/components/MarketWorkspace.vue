@@ -6,8 +6,20 @@ import { BarChart3, Droplets, LineChart as LineChartIcon } from '@lucide/vue'
 import { getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
-import type { IndicatorType, OptionBoardRow, OptionSeries, VolatilityPoint } from '@/types/moex'
+import type {
+  IndicatorPoint,
+  IndicatorType,
+  OptionBoardRow,
+  OptionSeries,
+  VolatilityPoint,
+} from '@/types/moex'
 import { formatCompact, formatNumber, formatPercent, todayMoscow } from '@/utils/format'
+import {
+  interpolateIndicator,
+  isLiquidOption,
+  niceAxisStep,
+  optionSpreadPercent,
+} from '@/utils/options'
 
 type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
 const store = usePortfolioStore()
@@ -33,6 +45,28 @@ const selectedSeries = computed(() =>
   series.value.find((item) => item.optionseries_code === selectedSeriesCode.value),
 )
 const currentGraph = computed(() => store.calculation.graphs[indicator.value])
+const liquidBoard = computed(() => board.value.filter((option) => isLiquidOption(option)))
+const chartBounds = computed(() => {
+  const prices = currentGraph.value?.now
+    .map((point) => point.underlying_price)
+    .filter((price) => Number.isFinite(price) && price > 0)
+  const spot = store.activeStrategy?.marketPrice ?? selectedSeries.value?.central_strike ?? null
+  if (spot && spot > 0) {
+    const strikes =
+      store.activeStrategy?.positions
+        .map((position) => position.strike)
+        .filter((strike): strike is number => Boolean(strike)) ?? []
+    const minimum = Math.max(0, Math.min(spot * 0.75, ...strikes.map((strike) => strike * 0.95)))
+    const maximum = Math.max(spot * 1.25, ...strikes.map((strike) => strike * 1.05))
+    return { minimum, maximum, spot, step: niceAxisStep(maximum - minimum) }
+  }
+  if (prices?.length) {
+    const minimum = Math.min(...prices)
+    const maximum = Math.max(...prices)
+    return { minimum, maximum, spot: null, step: niceAxisStep(maximum - minimum) }
+  }
+  return { minimum: 0, maximum: 100, spot: null, step: 20 }
+})
 
 const baseChartStyle: EChartsOption = {
   backgroundColor: 'transparent',
@@ -64,23 +98,46 @@ const baseChartStyle: EChartsOption = {
 
 const profileOption = computed<EChartsOption>(() => {
   const graph = currentGraph.value
-  const markLine = store.activeStrategy?.marketPrice
+  const bounds = chartBounds.value
+  const chartData = (points: IndicatorPoint[]) =>
+    interpolateIndicator(points ?? [], bounds.minimum, bounds.maximum).map((point) => [
+      point.underlying_price,
+      point.value,
+    ])
+  const markLine = bounds.spot
     ? {
         silent: true,
         symbol: 'none',
-        lineStyle: { color: '#f0b44d', type: 'dashed' as const },
-        data: [{ xAxis: store.activeStrategy.marketPrice, name: 'Spot' }],
+        lineStyle: { color: '#f0b44d', type: 'dashed' as const, width: 1.5 },
+        label: {
+          show: true,
+          formatter: `Базовый ${formatNumber(bounds.spot)}`,
+          color: '#f0b44d',
+          backgroundColor: '#171c24',
+          padding: [4, 6],
+          borderRadius: 3,
+        },
+        data: [{ xAxis: bounds.spot, name: 'Базовый актив' }],
       }
     : undefined
   return {
     ...baseChartStyle,
+    xAxis: {
+      ...(baseChartStyle.xAxis as object),
+      min: bounds.minimum,
+      max: bounds.maximum,
+      interval: bounds.step,
+      splitNumber: 6,
+      axisLabel: { hideOverlap: true, formatter: (value: number) => formatNumber(value) },
+    },
+    yAxis: { ...(baseChartStyle.yAxis as object), scale: true, splitNumber: 6 },
     series: [
       {
         name: 'Сейчас',
         type: 'line',
         showSymbol: false,
         smooth: 0.16,
-        data: graph?.now.map((point) => [point.underlying_price, point.value]) ?? [],
+        data: chartData(graph?.now ?? []),
         lineStyle: { width: 2, color: '#45d2a4' },
         itemStyle: { color: '#45d2a4' },
         areaStyle: { color: 'rgba(69,210,164,.08)' },
@@ -90,7 +147,7 @@ const profileOption = computed<EChartsOption>(() => {
         name: 'На экспирацию',
         type: 'line',
         showSymbol: false,
-        data: graph?.on_expiration.map((point) => [point.underlying_price, point.value]) ?? [],
+        data: chartData(graph?.on_expiration ?? []),
         lineStyle: { width: 2, color: '#5f8ff7' },
         itemStyle: { color: '#5f8ff7' },
       },
@@ -100,7 +157,7 @@ const profileOption = computed<EChartsOption>(() => {
               name: 'Сценарий',
               type: 'line' as const,
               showSymbol: false,
-              data: graph.on_what_if.map((point) => [point.underlying_price, point.value]),
+              data: chartData(graph.on_what_if),
               lineStyle: { width: 2, color: '#d592ff', type: 'dashed' as const },
               itemStyle: { color: '#d592ff' },
             },
@@ -128,13 +185,8 @@ const smileOption = computed<EChartsOption>(() => ({
   ],
 }))
 
-function spread(row: OptionBoardRow): number | null {
-  if (!row.bid || !row.offer || row.offer <= 0) return null
-  return ((row.offer - row.bid) / ((row.offer + row.bid) / 2)) * 100
-}
-
 function liquidityClass(row: OptionBoardRow): string {
-  const value = spread(row)
+  const value = optionSpreadPercent(row)
   if (!row.bid || !row.offer || !row.numtrades) return 'poor'
   if (value !== null && value > 10) return 'medium'
   return 'good'
@@ -190,6 +242,14 @@ async function loadSeriesData(): Promise<void> {
     if (boardResult.status === 'rejected' && smileResult.status === 'rejected') {
       throw boardResult.reason
     }
+    const currentSeries = selectedSeries.value
+    const quoteSecid = currentSeries?.futures_code || strategy.assetCode
+    try {
+      strategy.marketPrice =
+        (await getMarketPrice(quoteSecid)).price ?? currentSeries?.central_strike
+    } catch {
+      strategy.marketPrice = currentSeries?.central_strike ?? null
+    }
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
   } finally {
@@ -228,6 +288,7 @@ watch(selectedSeriesCode, loadSeriesData)
 
     <template v-if="activeTab === 'profile'">
       <div class="indicator-switcher">
+        <span class="indicator-caption">График</span>
         <button
           v-for="(label, key) in indicatorLabels"
           :key="key"
@@ -236,6 +297,9 @@ watch(selectedSeriesCode, loadSeriesData)
         >
           {{ label }}
         </button>
+        <span v-if="chartBounds.spot" class="underlying-price-chip">
+          Базовый <strong>{{ formatNumber(chartBounds.spot) }}</strong>
+        </span>
       </div>
       <div v-if="currentGraph?.now.length" class="chart-frame">
         <VChart :option="profileOption" autoresize />
@@ -275,7 +339,7 @@ watch(selectedSeriesCode, loadSeriesData)
           }}</strong></span
         >
         <span
-          ><small>Контрактов</small><strong>{{ board.length }}</strong></span
+          ><small>Ликвидных контрактов</small><strong>{{ liquidBoard.length }}</strong></span
         >
       </div>
       <div class="liquidity-table-wrap">
@@ -286,6 +350,7 @@ watch(selectedSeriesCode, loadSeriesData)
               <th>Страйк</th>
               <th>Bid</th>
               <th>Offer</th>
+              <th>Расч. цена</th>
               <th>Спред</th>
               <th>Сделки</th>
               <th>IV</th>
@@ -293,14 +358,19 @@ watch(selectedSeriesCode, loadSeriesData)
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in board" :key="row.secid">
+            <tr v-for="row in liquidBoard" :key="row.secid">
               <td>
                 <strong>{{ row.secid }}</strong>
               </td>
               <td>{{ formatNumber(row.strike) }}</td>
               <td>{{ formatNumber(row.bid) }}</td>
               <td>{{ formatNumber(row.offer) }}</td>
-              <td>{{ spread(row) === null ? '—' : formatPercent(spread(row)) }}</td>
+              <td>{{ formatNumber(row.theorprice) }}</td>
+              <td>
+                {{
+                  optionSpreadPercent(row) === null ? '—' : formatPercent(optionSpreadPercent(row))
+                }}
+              </td>
               <td>{{ formatNumber(row.numtrades) }}</td>
               <td>{{ formatPercent(row.volatility) }}</td>
               <td>
