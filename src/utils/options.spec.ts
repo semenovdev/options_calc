@@ -6,6 +6,7 @@ import {
   isLiquidOption,
   niceAxisStep,
   optionsAroundPrice,
+  splitProfitLossArea,
 } from './options'
 
 describe('option helpers', () => {
@@ -46,5 +47,22 @@ describe('option helpers', () => {
         110,
       ),
     ).toBe(10)
+  })
+
+  it('splits profit and loss areas at the zero crossing', () => {
+    const areas = splitProfitLossArea([
+      { underlying_price: 100, value: -20 },
+      { underlying_price: 120, value: 20 },
+    ])
+    expect(areas.profit).toEqual([
+      { underlying_price: 100, value: 0 },
+      { underlying_price: 110, value: 0 },
+      { underlying_price: 120, value: 20 },
+    ])
+    expect(areas.loss).toEqual([
+      { underlying_price: 100, value: -20 },
+      { underlying_price: 110, value: 0 },
+      { underlying_price: 120, value: 0 },
+    ])
   })
 })

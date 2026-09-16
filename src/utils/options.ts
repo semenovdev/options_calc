@@ -72,3 +72,29 @@ export function indicatorValueAt(points: IndicatorPoint[], price: number): numbe
   if (!points.length || !Number.isFinite(price)) return null
   return interpolateIndicator(points, price, price + 1, 2)[0]?.value ?? null
 }
+
+export function splitProfitLossArea(points: IndicatorPoint[]): {
+  profit: IndicatorPoint[]
+  loss: IndicatorPoint[]
+} {
+  const profit: IndicatorPoint[] = []
+  const loss: IndicatorPoint[] = []
+
+  points.forEach((point, index) => {
+    const previous = points[index - 1]
+    if (previous && previous.value * point.value < 0) {
+      const ratio = -previous.value / (point.value - previous.value)
+      const crossing = {
+        underlying_price:
+          previous.underlying_price + ratio * (point.underlying_price - previous.underlying_price),
+        value: 0,
+      }
+      profit.push(crossing)
+      loss.push(crossing)
+    }
+    profit.push({ ...point, value: Math.max(0, point.value) })
+    loss.push({ ...point, value: Math.min(0, point.value) })
+  })
+
+  return { profit, loss }
+}

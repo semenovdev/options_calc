@@ -19,6 +19,7 @@ import {
   isLiquidOption,
   niceAxisStep,
   optionSpreadPercent,
+  splitProfitLossArea,
 } from '@/utils/options'
 
 type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
@@ -104,6 +105,35 @@ const profileOption = computed<EChartsOption>(() => {
       point.underlying_price,
       point.value,
     ])
+  const nowPoints = interpolateIndicator(graph?.now ?? [], bounds.minimum, bounds.maximum)
+  const expirationPoints = interpolateIndicator(
+    graph?.on_expiration ?? [],
+    bounds.minimum,
+    bounds.maximum,
+  )
+  const scenarioPoints = interpolateIndicator(
+    graph?.on_what_if ?? [],
+    bounds.minimum,
+    bounds.maximum,
+  )
+  const payoffPoints = expirationPoints.length ? expirationPoints : nowPoints
+  const areas = splitProfitLossArea(payoffPoints)
+  const payoffSegment = (profit: boolean): [number, number | null][] => {
+    const result: [number, number | null][] = []
+    payoffPoints.forEach((point, index) => {
+      const previous = payoffPoints[index - 1]
+      if (previous && previous.value * point.value < 0) {
+        const ratio = -previous.value / (point.value - previous.value)
+        result.push([
+          previous.underlying_price + ratio * (point.underlying_price - previous.underlying_price),
+          0,
+        ])
+      }
+      const belongs = profit ? point.value >= 0 : point.value <= 0
+      result.push([point.underlying_price, belongs ? point.value : null])
+    })
+    return result
+  }
   const markLine = bounds.spot
     ? {
         silent: true,
@@ -130,34 +160,105 @@ const profileOption = computed<EChartsOption>(() => {
       splitNumber: 6,
       axisLabel: { hideOverlap: true, formatter: (value: number) => formatNumber(value) },
     },
-    yAxis: { ...(baseChartStyle.yAxis as object), scale: true, splitNumber: 6 },
+    legend: {
+      ...(baseChartStyle.legend as object),
+      data: scenarioPoints.length
+        ? ['Сейчас', 'На экспирацию', 'Сценарий']
+        : ['Сейчас', 'На экспирацию'],
+    },
+    yAxis: {
+      ...(baseChartStyle.yAxis as object),
+      scale: true,
+      splitNumber: 6,
+      min: (value: { min: number; max: number }) => {
+        const step = niceAxisStep(value.max - value.min)
+        return Math.floor(Math.min(0, value.min) / step) * step
+      },
+      max: (value: { min: number; max: number }) => {
+        const step = niceAxisStep(value.max - value.min)
+        return Math.ceil(Math.max(0, value.max) / step) * step
+      },
+    },
     series: [
+      ...(indicator.value === 'profit_and_loss'
+        ? [
+            {
+              name: 'Зона прибыли',
+              type: 'line' as const,
+              data: chartData(areas.profit),
+              showSymbol: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { opacity: 0 },
+              areaStyle: { color: 'rgba(69,210,164,.18)', origin: 0 },
+              z: 0,
+            },
+            {
+              name: 'Зона убытка',
+              type: 'line' as const,
+              data: chartData(areas.loss),
+              showSymbol: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { opacity: 0 },
+              areaStyle: { color: 'rgba(255,100,116,.18)', origin: 0 },
+              z: 0,
+            },
+          ]
+        : []),
       {
         name: 'Сейчас',
         type: 'line',
         showSymbol: false,
         smooth: 0.16,
-        data: chartData(graph?.now ?? []),
+        data: chartData(nowPoints),
         lineStyle: { width: 2, color: '#45d2a4' },
         itemStyle: { color: '#45d2a4' },
-        areaStyle: { color: 'rgba(69,210,164,.08)' },
         markLine,
+        z: 2,
       },
       {
         name: 'На экспирацию',
         type: 'line',
         showSymbol: false,
-        data: chartData(graph?.on_expiration ?? []),
+        data: chartData(expirationPoints),
         lineStyle: { width: 2, color: '#5f8ff7' },
         itemStyle: { color: '#5f8ff7' },
+        z: 2,
       },
-      ...(graph?.on_what_if?.length
+      ...(indicator.value === 'profit_and_loss'
+        ? [
+            {
+              name: 'Payoff: прибыль',
+              type: 'line' as const,
+              data: payoffSegment(true),
+              showSymbol: false,
+              connectNulls: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { width: 2.6, color: '#45d2a4' },
+              z: 4,
+            },
+            {
+              name: 'Payoff: убыток',
+              type: 'line' as const,
+              data: payoffSegment(false),
+              showSymbol: false,
+              connectNulls: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { width: 2.6, color: '#ff6474' },
+              z: 4,
+            },
+          ]
+        : []),
+      ...(scenarioPoints.length
         ? [
             {
               name: 'Сценарий',
               type: 'line' as const,
               showSymbol: false,
-              data: chartData(graph.on_what_if),
+              data: chartData(scenarioPoints),
               lineStyle: { width: 2, color: '#d592ff', type: 'dashed' as const },
               itemStyle: { color: '#d592ff' },
             },
