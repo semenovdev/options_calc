@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Activity, Download, FileJson, Plus, RefreshCw, Wifi } from '@lucide/vue'
 
 import InstrumentComposer from '@/components/InstrumentComposer.vue'
@@ -7,12 +7,24 @@ import MarketWorkspace from '@/components/MarketWorkspace.vue'
 import PositionTable from '@/components/PositionTable.vue'
 import StrategyRail from '@/components/StrategyRail.vue'
 import SummaryPanel from '@/components/SummaryPanel.vue'
+import { appConfig } from '@/config'
 import { usePortfolioStore } from '@/stores/portfolio'
 import { exportStrategyCsv, exportStrategyJson } from '@/utils/export'
 
 const store = usePortfolioStore()
 const composerOpen = ref(false)
 const hasPositions = computed(() => Boolean(store.activeStrategy?.positions.length))
+let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
+
+function refreshActiveStrategy(): void {
+  if (
+    globalThis.document.visibilityState === 'visible' &&
+    store.activeStrategy?.positions.length &&
+    !store.calculation.loading
+  ) {
+    void store.calculate()
+  }
+}
 
 watch(
   () => store.activeId,
@@ -21,6 +33,12 @@ watch(
   },
   { immediate: true, flush: 'post' },
 )
+
+onMounted(() => {
+  refreshTimer = globalThis.setInterval(refreshActiveStrategy, appConfig.autoRefreshIntervalMs)
+})
+
+onBeforeUnmount(() => globalThis.clearInterval(refreshTimer))
 </script>
 
 <template>
