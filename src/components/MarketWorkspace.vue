@@ -26,6 +26,7 @@ type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
 const store = usePortfolioStore()
 const activeTab = ref<WorkspaceTab>('profile')
 const indicator = ref<IndicatorType>('profit_and_loss')
+const scenarioVisible = ref(false)
 const series = ref<OptionSeries[]>([])
 const selectedSeriesCode = ref('')
 const board = ref<OptionBoardRow[]>([])
@@ -165,6 +166,7 @@ const profileOption = computed<EChartsOption>(() => {
       data: scenarioPoints.length
         ? ['Сейчас', 'На экспирацию', 'Сценарий']
         : ['Сейчас', 'На экспирацию'],
+      selected: { Сценарий: scenarioVisible.value },
     },
     yAxis: {
       ...(baseChartStyle.yAxis as object),
@@ -356,6 +358,11 @@ async function loadSeriesData(): Promise<void> {
   }
 }
 
+function handleLegendSelection(event: { selected?: Record<string, boolean> }): void {
+  const selected = event.selected?.['Сценарий']
+  if (selected !== undefined) scenarioVisible.value = selected
+}
+
 watch(() => store.activeId, loadMarketData, { immediate: true })
 watch(selectedSeriesCode, loadSeriesData)
 </script>
@@ -401,7 +408,7 @@ watch(selectedSeriesCode, loadSeriesData)
         </span>
       </div>
       <div v-if="currentGraph?.now.length" class="chart-frame">
-        <VChart :option="profileOption" autoresize />
+        <VChart :option="profileOption" autoresize @legendselectchanged="handleLegendSelection" />
       </div>
       <div v-else class="chart-empty">
         <LineChartIcon :size="28" />
