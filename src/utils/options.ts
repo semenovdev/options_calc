@@ -60,6 +60,18 @@ export function plausibleUnderlyingPrice(
   return ratio >= 0.5 && ratio <= 2 ? candidate : reference
 }
 
+export function sanitizeGreekExpiration(
+  current: IndicatorPoint[],
+  expiration: IndicatorPoint[],
+): IndicatorPoint[] {
+  const currentMaximum = Math.max(0, ...current.map((point) => Math.abs(point.value)))
+  const limit = Math.max(1, currentMaximum * 1000)
+  return expiration.map((point) => ({
+    ...point,
+    value: Number.isFinite(point.value) && Math.abs(point.value) <= limit ? point.value : 0,
+  }))
+}
+
 export function niceAxisStep(range: number, targetSplits = 6): number {
   if (!Number.isFinite(range) || range <= 0) return 1
   const rough = range / targetSplits

@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 
 import { getInstrumentSpecification } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
-import type { CalculatedPortfolio, IndicatorGraph, IndicatorType } from '@/types/moex'
+import type { IndicatorGraph, IndicatorType } from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
 import { addLinearPositionsToGraph, linearMultiplier, linearPnl } from '@/utils/linearPnl'
@@ -38,6 +38,23 @@ function restore(): { strategies: Strategy[]; activeId: string } {
   }
   const strategy = initialStrategy()
   return { strategies: [strategy], activeId: strategy.id }
+}
+
+async function loadOptionGraphs(
+  payload: ReturnType<typeof toPortfolioRequest>,
+): Promise<Partial<Record<IndicatorType, IndicatorGraph>>> {
+  const graphs: Partial<Record<IndicatorType, IndicatorGraph>> = {}
+  const concurrency = 2
+  for (let index = 0; index < indicators.length; index += concurrency) {
+    const batch = indicators.slice(index, index + concurrency)
+    const results = await Promise.allSettled(
+      batch.map((indicator) => optionCalcApi.getPortfolioGraph(indicator, payload)),
+    )
+    results.forEach((result, resultIndex) => {
+      if (result.status === 'fulfilled') graphs[batch[resultIndex]!] = result.value
+    })
+  }
+  return graphs
 }
 
 export const usePortfolioStore = defineStore('portfolio', () => {
@@ -154,7 +171,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         what_if: undefined,
       }
       const currentOptionPayload = { ...optionPayload, what_if: undefined }
-      const [fullPortfolioResult, optionResults] = await Promise.all([
+      const [fullPortfolioResult, optionPortfolio, optionGraphs] = await Promise.all([
         linearPositions.length
           ? optionCalcApi
               .calculatePortfolio(currentPortfolioPayload)
@@ -162,17 +179,13 @@ export const usePortfolioStore = defineStore('portfolio', () => {
               .catch(() => ({ value: null }))
           : Promise.resolve({ value: null }),
         optionPositions.length
-          ? Promise.all([
-              optionCalcApi.calculatePortfolio(currentOptionPayload),
-              ...indicators.map((indicator) =>
-                optionCalcApi.getPortfolioGraph(indicator, optionPayload),
-              ),
-            ])
-          : Promise.resolve([]),
+          ? optionCalcApi.calculatePortfolio(currentOptionPayload)
+          : Promise.resolve(undefined),
+        optionPositions.length
+          ? loadOptionGraphs(optionPayload)
+          : Promise.resolve({} as Partial<Record<IndicatorType, IndicatorGraph>>),
       ])
       const fullPortfolio = fullPortfolioResult.value
-      const optionPortfolio = optionResults[0] as CalculatedPortfolio | undefined
-      const optionGraphs = optionResults.slice(1) as IndicatorGraph[]
       const linearPnlNow = linear.reduce(
         (total, item) =>
           total + linearPnl(item, item.specification.price ?? item.position.price ?? 0),
@@ -192,9 +205,9 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         selectedPositions.find((position) => position.price !== undefined)?.price ??
         100
       const graphs = Object.fromEntries(
-        indicators.map((indicator, index) => [
+        indicators.map((indicator) => [
           indicator,
-          addLinearPositionsToGraph(optionGraphs[index], linear, indicator, spot),
+          addLinearPositionsToGraph(optionGraphs[indicator], linear, indicator, spot),
         ]),
       ) as Record<IndicatorType, IndicatorGraph>
       const hasScenario =

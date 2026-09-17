@@ -27,6 +27,7 @@ import {
   optionSpreadPercent,
   plausibleUnderlyingPrice,
   profitLossIntervals,
+  sanitizeGreekExpiration,
 } from '@/utils/options'
 
 type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
@@ -121,11 +122,11 @@ const profileOption = computed<EChartsOption>(() => {
       point.value,
     ])
   const nowPoints = interpolateIndicator(graph?.now ?? [], bounds.minimum, bounds.maximum)
-  const expirationPoints = interpolateIndicator(
-    graph?.on_expiration ?? [],
-    bounds.minimum,
-    bounds.maximum,
-  )
+  const expirationSource =
+    indicator.value === 'profit_and_loss'
+      ? (graph?.on_expiration ?? [])
+      : sanitizeGreekExpiration(graph?.now ?? [], graph?.on_expiration ?? [])
+  const expirationPoints = interpolateIndicator(expirationSource, bounds.minimum, bounds.maximum)
   const scenarioPoints = interpolateIndicator(
     graph?.on_what_if ?? [],
     bounds.minimum,

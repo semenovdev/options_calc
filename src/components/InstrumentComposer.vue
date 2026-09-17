@@ -78,7 +78,7 @@ const filteredBoard = computed(() => {
   )
   const range = Number.isFinite(strikeRange.value) ? Math.max(0, strikeRange.value) : 5
   return optionsBySpot(matching, underlyingPrice.value, range).sort(
-    (left, right) => left.strike - right.strike,
+    (left, right) => right.strike - left.strike,
   )
 })
 const selectedOption = computed(() =>
@@ -99,7 +99,7 @@ const atmStrike = computed(() => {
 })
 const spotDividerIndex = computed(() => {
   if (!underlyingPrice.value) return -1
-  const index = filteredBoard.value.findIndex((item) => item.strike > underlyingPrice.value!)
+  const index = filteredBoard.value.findIndex((item) => item.strike <= underlyingPrice.value!)
   return index > 0 ? index : -1
 })
 
