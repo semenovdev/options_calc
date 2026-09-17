@@ -50,6 +50,16 @@ export function optionsBySpot(
   return [...below, ...above]
 }
 
+export function plausibleUnderlyingPrice(
+  candidate: number | null | undefined,
+  reference: number | null | undefined,
+): number | null {
+  if (!candidate || !Number.isFinite(candidate) || candidate <= 0) return reference ?? null
+  if (!reference || !Number.isFinite(reference) || reference <= 0) return candidate
+  const ratio = candidate / reference
+  return ratio >= 0.5 && ratio <= 2 ? candidate : reference
+}
+
 export function niceAxisStep(range: number, targetSplits = 6): number {
   if (!Number.isFinite(range) || range <= 0) return 1
   const rough = range / targetSplits

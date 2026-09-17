@@ -15,6 +15,24 @@ import type {
 import { queryString, requestJson } from './http'
 
 const BASE = '/moex-option-calc'
+const portfolioRequests = new Map<string, Promise<CalculatedPortfolio>>()
+
+function calculatePortfolio(payload: PortfolioRequest): Promise<CalculatedPortfolio> {
+  const key = JSON.stringify(payload)
+  const pending = portfolioRequests.get(key)
+  if (pending) return pending
+
+  const request = requestJson<CalculatedPortfolio>(`${BASE}/portfolio/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: key,
+    retries: 2,
+  }).finally(() => {
+    if (portfolioRequests.get(key) === request) portfolioRequests.delete(key)
+  })
+  portfolioRequests.set(key, request)
+  return request
+}
 
 export const optionCalcApi = {
   searchAssets(query: string, assetType?: AssetType) {
@@ -54,14 +72,7 @@ export const optionCalcApi = {
     )
   },
 
-  calculatePortfolio(payload: PortfolioRequest) {
-    return requestJson<CalculatedPortfolio>(`${BASE}/portfolio/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      retries: 2,
-    })
-  },
+  calculatePortfolio,
 
   getPortfolioGraph(indicator: IndicatorType, payload: PortfolioRequest) {
     return requestJson<IndicatorGraph>(`${BASE}/portfolio/graph/${indicator}`, {

@@ -77,7 +77,9 @@ const filteredBoard = computed(() => {
       !needle || item.secid.toLowerCase().includes(needle) || String(item.strike).includes(needle),
   )
   const range = Number.isFinite(strikeRange.value) ? Math.max(0, strikeRange.value) : 5
-  return optionsBySpot(matching, underlyingPrice.value, range)
+  return optionsBySpot(matching, underlyingPrice.value, range).sort(
+    (left, right) => left.strike - right.strike,
+  )
 })
 const selectedOption = computed(() =>
   board.value.find((item) => item.secid === selectedSecid.value),

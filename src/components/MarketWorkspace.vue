@@ -25,6 +25,7 @@ import {
   isLiquidOption,
   niceAxisStep,
   optionSpreadPercent,
+  plausibleUnderlyingPrice,
   profitLossIntervals,
 } from '@/utils/options'
 
@@ -58,14 +59,21 @@ const chartBounds = computed(() => {
   const prices = currentGraph.value?.now
     .map((point) => point.underlying_price)
     .filter((price) => Number.isFinite(price) && price > 0)
-  const spot = store.activeStrategy?.marketPrice ?? selectedSeries.value?.central_strike ?? null
+  const positionStrikes =
+    store.activeStrategy?.positions
+      .map((position) => position.strike)
+      .filter((strike): strike is number => Boolean(strike)) ?? []
+  const strikeReference = positionStrikes.length
+    ? positionStrikes.reduce((total, strike) => total + strike, 0) / positionStrikes.length
+    : null
+  const reference = strikeReference ?? selectedSeries.value?.central_strike
+  const spot = plausibleUnderlyingPrice(store.activeStrategy?.marketPrice, reference)
   if (spot && spot > 0) {
-    const strikes =
-      store.activeStrategy?.positions
-        .map((position) => position.strike)
-        .filter((strike): strike is number => Boolean(strike)) ?? []
-    const minimum = Math.max(0, Math.min(spot * 0.75, ...strikes.map((strike) => strike * 0.95)))
-    const maximum = Math.max(spot * 1.25, ...strikes.map((strike) => strike * 1.05))
+    const minimum = Math.max(
+      0,
+      Math.min(spot * 0.75, ...positionStrikes.map((strike) => strike * 0.95)),
+    )
+    const maximum = Math.max(spot * 1.25, ...positionStrikes.map((strike) => strike * 1.05))
     return { minimum, maximum, spot, step: niceAxisStep(maximum - minimum) }
   }
   if (prices?.length) {
@@ -316,8 +324,8 @@ async function updateMarketPrice(
 ): Promise<void> {
   const quoteSecid = optionSeries?.futures_code || strategy.assetCode
   try {
-    strategy.marketPrice =
-      (await getMarketPrice(quoteSecid)).price ?? optionSeries?.central_strike ?? null
+    const quote = (await getMarketPrice(quoteSecid)).price
+    strategy.marketPrice = plausibleUnderlyingPrice(quote, optionSeries?.central_strike)
   } catch {
     strategy.marketPrice = optionSeries?.central_strike ?? null
   }
@@ -328,6 +336,10 @@ async function loadMarketData(): Promise<void> {
   if (!strategy) return
   loadingMarket.value = true
   marketError.value = null
+  series.value = []
+  selectedSeriesCode.value = ''
+  board.value = []
+  smile.value = []
   try {
     series.value = (await optionCalcApi.getSeries(strategy.assetCode, strategy.assetType)).filter(
       (item) => item.expiration_date >= todayMoscow(),

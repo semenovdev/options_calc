@@ -8,6 +8,7 @@ import {
   optionMarketPrice,
   optionsAroundPrice,
   optionsBySpot,
+  plausibleUnderlyingPrice,
   profitLossIntervals,
   splitProfitLossArea,
 } from './options'
@@ -39,6 +40,11 @@ describe('option helpers', () => {
     expect(optionsBySpot(options, 100, 2).map((option) => option.strike)).toEqual([
       80, 90, 110, 120,
     ])
+  })
+
+  it('rejects an underlying quote in incompatible units', () => {
+    expect(plausibleUnderlyingPrice(280, 86_000)).toBe(86_000)
+    expect(plausibleUnderlyingPrice(85_952, 86_000)).toBe(85_952)
   })
 
   it('uses readable dynamic axis steps', () => {

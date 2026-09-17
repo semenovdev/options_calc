@@ -155,10 +155,12 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       }
       const currentOptionPayload = { ...optionPayload, what_if: undefined }
       const [fullPortfolioResult, optionResults] = await Promise.all([
-        optionCalcApi
-          .calculatePortfolio(currentPortfolioPayload)
-          .then((value) => ({ value }))
-          .catch(() => ({ value: null })),
+        linearPositions.length
+          ? optionCalcApi
+              .calculatePortfolio(currentPortfolioPayload)
+              .then((value) => ({ value }))
+              .catch(() => ({ value: null }))
+          : Promise.resolve({ value: null }),
         optionPositions.length
           ? Promise.all([
               optionCalcApi.calculatePortfolio(currentOptionPayload),
@@ -227,7 +229,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
           })),
         ],
         total: totals,
-        initial_margin: fullPortfolio?.initial_margin,
+        initial_margin: fullPortfolio?.initial_margin ?? optionPortfolio?.initial_margin,
       }
       calculation.graphs = graphs
       calculation.calculatedAt = new Date().toISOString()
