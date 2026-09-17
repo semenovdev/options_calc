@@ -140,6 +140,18 @@ const profileOption = computed<EChartsOption>(() => {
       ? formatMoneyFixed(numericValue)
       : formatNumber(numericValue)
   }
+  const currentLossSegment: [number, number | null][] = []
+  nowPoints.forEach((point, index) => {
+    const previous = nowPoints[index - 1]
+    if (previous && previous.value * point.value < 0) {
+      const ratio = -previous.value / (point.value - previous.value)
+      currentLossSegment.push([
+        previous.underlying_price + ratio * (point.underlying_price - previous.underlying_price),
+        0,
+      ])
+    }
+    currentLossSegment.push([point.underlying_price, point.value <= 0 ? point.value : null])
+  })
   const markLine = bounds.spot
     ? {
         silent: true,
@@ -208,12 +220,27 @@ const profileOption = computed<EChartsOption>(() => {
         showSymbol: false,
         smooth: 0.16,
         data: chartData(nowPoints),
-        lineStyle: { width: 2, color: '#d8c7a0' },
-        itemStyle: { color: '#d8c7a0' },
+        lineStyle: { width: 2, color: '#45d2a4' },
+        itemStyle: { color: '#45d2a4' },
         tooltip: { valueFormatter: tooltipValueFormatter },
         markLine,
         z: 2,
       },
+      ...(indicator.value === 'profit_and_loss'
+        ? [
+            {
+              name: 'Сейчас: убыток',
+              type: 'line' as const,
+              data: currentLossSegment,
+              showSymbol: false,
+              connectNulls: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { width: 2.4, color: '#ff6474' },
+              z: 4,
+            },
+          ]
+        : []),
       {
         name: 'На экспирацию',
         type: 'line',
