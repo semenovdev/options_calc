@@ -9,6 +9,7 @@ import type { Asset, Future, InstrumentType, OptionBoardRow, OptionSeries } from
 import type { Position } from '@/types/portfolio'
 import { formatNumber, todayMoscow } from '@/utils/format'
 import {
+  hasTheoreticalPrice,
   isLiquidOption,
   optionMarketPrice,
   optionSpreadPercent,
@@ -61,7 +62,7 @@ function eligibleOptions(side: 'call' | 'put', mode: 'market' | 'theoretical') {
   const options = board.value.filter(
     (item) =>
       item.option_type === side &&
-      (mode === 'market' ? isLiquidOption(item) : (item.theorprice ?? 0) > 0),
+      (mode === 'market' ? isLiquidOption(item) : hasTheoreticalPrice(item)),
   )
   return Array.from(new Map(options.map((item) => [item.secid, item])).values())
 }

@@ -10,6 +10,15 @@ export function isLiquidOption(option: OptionBoardRow, maximumSpread = 50): bool
   return spread !== null && spread >= 0 && spread <= maximumSpread
 }
 
+export function hasTheoreticalPrice(option: OptionBoardRow): boolean {
+  return (
+    option.theorprice !== null &&
+    option.theorprice !== undefined &&
+    Number.isFinite(option.theorprice) &&
+    option.theorprice >= 0
+  )
+}
+
 export function optionMarketPrice(option: OptionBoardRow): number | null {
   if (option.last && option.last > 0) return option.last
   if (option.bid && option.offer && option.bid > 0 && option.offer > 0) {

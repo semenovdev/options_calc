@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   indicatorValueAt,
+  hasTheoreticalPrice,
   interpolateIndicator,
   isLiquidOption,
   niceAxisStep,
@@ -25,6 +26,13 @@ describe('option helpers', () => {
   it('does not substitute a theoretical price for a missing market price', () => {
     expect(optionMarketPrice({ secid: 'THEORETICAL', strike: 100, theorprice: 12 })).toBeNull()
     expect(optionMarketPrice({ secid: 'QUOTED', strike: 100, bid: 10, offer: 12 })).toBe(11)
+  })
+
+  it('keeps zero-valued theoretical prices at expiration', () => {
+    expect(hasTheoreticalPrice({ secid: 'ZERO', strike: 100, theorprice: 0 })).toBe(true)
+    expect(hasTheoreticalPrice({ secid: 'POSITIVE', strike: 100, theorprice: 12 })).toBe(true)
+    expect(hasTheoreticalPrice({ secid: 'MISSING', strike: 100 })).toBe(false)
+    expect(hasTheoreticalPrice({ secid: 'INVALID', strike: 100, theorprice: -1 })).toBe(false)
   })
 
   it('keeps the requested number of strikes around ATM', () => {
