@@ -897,6 +897,13 @@ th {
   cursor: pointer;
   text-align: left;
 }
+.search-result-group {
+  padding: 10px 10px 4px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
 .asset-results button {
   min-height: 53px;
   display: grid;
@@ -975,7 +982,7 @@ th {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(190px, 1.2fr) minmax(150px, 0.8fr) minmax(210px, 1fr);
   grid-template-rows: auto auto auto minmax(150px, 1fr);
   gap: 10px;
 }
@@ -984,7 +991,8 @@ th {
 .instrument-picker .search-field {
   grid-column: 1 / -1;
 }
-.option-side-control {
+.option-side-control,
+.option-price-control {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3px;
@@ -995,7 +1003,8 @@ th {
   border-radius: 4px;
   background: #0b0f14;
 }
-.option-side-control button {
+.option-side-control button,
+.option-price-control button {
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -1005,8 +1014,17 @@ th {
     600 10px 'IBM Plex Mono',
     monospace;
 }
-.option-side-control button.active {
+.option-side-control button.active,
+.option-price-control button.active {
   background: var(--panel-3);
+  color: var(--green);
+}
+.option-side-control button span {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 8px;
+}
+.option-side-control button.active span {
   color: var(--green);
 }
 .strike-window-controls {
@@ -1125,17 +1143,37 @@ th {
 }
 .empty-options {
   padding: 30px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   text-align: center;
   color: var(--muted);
   font-size: 10px;
 }
+.option-list .empty-options .secondary-button {
+  min-height: 32px;
+  display: inline-flex;
+  grid-template-columns: none;
+  padding: 0 12px;
+}
 .quote {
   text-align: right;
+}
+.future-picker {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
 }
 .futures-list {
   flex: 1;
   min-height: 0;
   max-height: none;
+}
+.related-options-button {
+  flex: 0 0 auto;
 }
 .futures-list button {
   min-height: 58px;
@@ -1287,7 +1325,7 @@ th {
   }
   .instrument-picker {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto minmax(160px, 1fr);
+    grid-template-rows: auto auto auto auto auto minmax(160px, 1fr);
   }
   .instrument-picker .option-list,
   .instrument-picker .strike-window-controls,

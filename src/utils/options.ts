@@ -15,7 +15,7 @@ export function optionMarketPrice(option: OptionBoardRow): number | null {
   if (option.bid && option.offer && option.bid > 0 && option.offer > 0) {
     return (option.bid + option.offer) / 2
   }
-  return option.theorprice ?? null
+  return null
 }
 
 export function optionsAroundPrice(

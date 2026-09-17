@@ -5,6 +5,7 @@ import {
   interpolateIndicator,
   isLiquidOption,
   niceAxisStep,
+  optionMarketPrice,
   optionsAroundPrice,
   profitLossIntervals,
   splitProfitLossArea,
@@ -15,6 +16,11 @@ describe('option helpers', () => {
     expect(isLiquidOption({ secid: 'LIQUID', strike: 100, bid: 9, offer: 11 })).toBe(true)
     expect(isLiquidOption({ secid: 'WIDE', strike: 100, bid: 1, offer: 10 })).toBe(false)
     expect(isLiquidOption({ secid: 'NO-OFFER', strike: 100, bid: 5, offer: 0 })).toBe(false)
+  })
+
+  it('does not substitute a theoretical price for a missing market price', () => {
+    expect(optionMarketPrice({ secid: 'THEORETICAL', strike: 100, theorprice: 12 })).toBeNull()
+    expect(optionMarketPrice({ secid: 'QUOTED', strike: 100, bid: 10, offer: 12 })).toBe(11)
   })
 
   it('keeps the requested number of strikes around ATM', () => {

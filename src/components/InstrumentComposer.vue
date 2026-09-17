@@ -15,12 +15,18 @@ import {
   optionsAroundPrice,
 } from '@/utils/options'
 
+const FUTURES_SEARCH_ALIASES: Record<string, string[]> = {
+  SBER: ['SBRF'],
+  СБЕР: ['SBRF'],
+}
+
 const open = defineModel<boolean>('open', { required: true })
 const store = usePortfolioStore()
 
 const step = ref<'asset' | 'instrument'>('asset')
 const query = ref('')
 const assets = ref<Asset[]>([])
+const searchFutures = ref<{ asset: Asset; future: Future }[]>([])
 const asset = ref<Asset | null>(null)
 const instrumentType = ref<Extract<InstrumentType, 'option' | 'futures' | 'share'>>('option')
 const series = ref<OptionSeries[]>([])
@@ -28,7 +34,9 @@ const selectedSeriesCode = ref('')
 const board = ref<OptionBoardRow[]>([])
 const futures = ref<Future[]>([])
 const selectedSecid = ref('')
+const linkedFutureCode = ref('')
 const optionSide = ref<'call' | 'put'>('call')
+const optionPriceMode = ref<'theoretical' | 'market'>('market')
 const strikeRange = ref(5)
 const underlyingPrice = ref<number | null>(null)
 const optionListRef = ref<globalThis.HTMLElement | null>(null)
@@ -41,35 +49,42 @@ const error = ref<string | null>(null)
 const pendingPositions = ref<Omit<Position, 'id'>[]>([])
 let searchTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 let instrumentRequestId = 0
+let searchRequestId = 0
+let selectingSearchFuture = false
 
 const selectedSeries = computed(() =>
   series.value.find((item) => item.optionseries_code === selectedSeriesCode.value),
 )
+function eligibleOptions(side: 'call' | 'put', mode: 'market' | 'theoretical') {
+  const options = board.value.filter(
+    (item) =>
+      item.option_type === side &&
+      (mode === 'market' ? isLiquidOption(item) : (item.theorprice ?? 0) > 0),
+  )
+  return Array.from(new Map(options.map((item) => [item.secid, item])).values())
+}
+
+const optionCounts = computed(() => {
+  return {
+    call: eligibleOptions('call', optionPriceMode.value).length,
+    put: eligibleOptions('put', optionPriceMode.value).length,
+  }
+})
 const filteredBoard = computed(() => {
   const needle = instrumentFilter.value.toLowerCase().trim()
-  const sideOptions = board.value.filter(
+  const matching = eligibleOptions(optionSide.value, optionPriceMode.value).filter(
     (item) =>
-      item.option_type === optionSide.value &&
-      (!needle ||
-        item.secid.toLowerCase().includes(needle) ||
-        String(item.strike).includes(needle)),
+      !needle || item.secid.toLowerCase().includes(needle) || String(item.strike).includes(needle),
   )
-  const liquidOptions = sideOptions.filter(isLiquidOption)
-  const matching = liquidOptions.length
-    ? liquidOptions
-    : sideOptions.filter((item) => (item.theorprice ?? 0) > 0)
-  return needle
-    ? matching.slice(0, 40)
-    : optionsAroundPrice(
-        matching,
-        underlyingPrice.value,
-        Math.max(0, strikeRange.value),
-        Math.max(0, strikeRange.value),
-      )
+  if (needle) return matching.slice(0, 40)
+
+  const range = Number.isFinite(strikeRange.value) ? Math.max(0, strikeRange.value) : 5
+  if (matching.length <= range * 2 + 1) {
+    return [...matching].sort((left, right) => left.strike - right.strike)
+  }
+
+  return optionsAroundPrice(matching, underlyingPrice.value, range, range)
 })
-const showingTheoreticalFallback = computed(() =>
-  filteredBoard.value.some((option) => !isLiquidOption(option)),
-)
 const selectedOption = computed(() =>
   board.value.find((item) => item.secid === selectedSecid.value),
 )
@@ -89,16 +104,49 @@ const atmStrike = computed(() => {
 
 watch(query, (value) => {
   globalThis.clearTimeout(searchTimer)
+  const requestId = ++searchRequestId
   if (value.trim().length < 1) {
     assets.value = []
+    searchFutures.value = []
     return
   }
   searchTimer = globalThis.setTimeout(async () => {
     loading.value = true
     error.value = null
     assets.value = []
+    searchFutures.value = []
     try {
-      assets.value = await optionCalcApi.searchAssets(value.trim())
+      const aliases = futuresSearchAliases(value)
+      const searchResults = await Promise.allSettled([
+        optionCalcApi.searchAssets(value.trim()),
+        ...aliases.map((code) => optionCalcApi.searchAssets(code, 'futures')),
+      ])
+      const foundAssets = Array.from(
+        new Map(
+          searchResults
+            .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+            .map((item) => [`${item.asset_type}:${item.asset_code}`, item]),
+        ).values(),
+      )
+      if (requestId !== searchRequestId) return
+      assets.value = foundAssets
+      const futuresResults = await Promise.allSettled(
+        foundAssets.map(async (foundAsset) => ({
+          asset: foundAsset,
+          futures: await optionCalcApi.getFutures(foundAsset.asset_code),
+        })),
+      )
+      if (requestId !== searchRequestId) return
+      searchFutures.value = futuresResults
+        .flatMap((result) =>
+          result.status === 'fulfilled'
+            ? result.value.futures.map((future) => ({ asset: result.value.asset, future }))
+            : [],
+        )
+        .filter(({ future }) => !future.expiration_date || future.expiration_date >= todayMoscow())
+        .sort((left, right) =>
+          (left.future.expiration_date ?? '').localeCompare(right.future.expiration_date ?? ''),
+        )
     } catch (reason) {
       error.value = reason instanceof Error ? reason.message : 'Ошибка поиска'
     } finally {
@@ -112,7 +160,6 @@ watch(selectedSeriesCode, async (code) => {
   const requestId = instrumentRequestId
   loading.value = true
   error.value = null
-  pendingPositions.value = []
   try {
     board.value = await optionCalcApi.getOptionBoard(
       asset.value.asset_code,
@@ -138,16 +185,24 @@ watch(selectedSeriesCode, async (code) => {
 })
 
 watch(instrumentType, async (type) => {
-  if (!asset.value || step.value !== 'instrument') return
+  if (selectingSearchFuture || !asset.value || step.value !== 'instrument') return
   await loadInstruments(type)
 })
 
-watch([optionSide, strikeRange], () => void scrollToAtm())
+watch(strikeRange, () => void scrollToAtm())
+
+watch([optionSide, optionPriceMode], () => {
+  selectedSecid.value = ''
+  price.value = undefined
+  volatility.value = undefined
+  void scrollToAtm()
+})
 
 function reset(): void {
   step.value = 'asset'
   query.value = ''
   assets.value = []
+  searchFutures.value = []
   asset.value = null
   instrumentType.value = 'option'
   series.value = []
@@ -155,7 +210,9 @@ function reset(): void {
   board.value = []
   futures.value = []
   selectedSecid.value = ''
+  linkedFutureCode.value = ''
   optionSide.value = 'call'
+  optionPriceMode.value = 'market'
   strikeRange.value = 5
   underlyingPrice.value = null
   quantity.value = 1
@@ -171,9 +228,26 @@ function close(): void {
 
 async function chooseAsset(value: Asset): Promise<void> {
   asset.value = value
+  linkedFutureCode.value = ''
   step.value = 'instrument'
-  if (value.asset_type === 'share') instrumentType.value = 'option'
+  instrumentType.value = value.asset_type === 'futures' ? 'futures' : 'option'
   await loadInstruments(instrumentType.value)
+}
+
+async function chooseSearchFuture(result: { asset: Asset; future: Future }): Promise<void> {
+  selectingSearchFuture = true
+  try {
+    asset.value = result.asset
+    instrumentType.value = 'futures'
+    futures.value = searchFutures.value
+      .filter(({ asset: foundAsset }) => foundAsset.asset_code === result.asset.asset_code)
+      .map(({ future }) => future)
+    step.value = 'instrument'
+    await chooseSecid(result.future.futures_code)
+    await nextTick()
+  } finally {
+    selectingSearchFuture = false
+  }
 }
 
 async function loadInstruments(type: typeof instrumentType.value): Promise<void> {
@@ -182,13 +256,21 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
   loading.value = true
   error.value = null
   selectedSecid.value = ''
+  price.value = undefined
+  volatility.value = undefined
   try {
     if (type === 'option') {
       const result = await optionCalcApi.getSeries(asset.value.asset_code, asset.value.asset_type)
       if (requestId !== instrumentRequestId) return
-      series.value = result.filter((item) => item.expiration_date >= todayMoscow())
+      const activeSeries = result.filter((item) => item.expiration_date >= todayMoscow())
+      series.value = linkedFutureCode.value
+        ? activeSeries.filter((item) => item.futures_code === linkedFutureCode.value)
+        : activeSeries
       series.value.sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
       selectedSeriesCode.value = series.value[0]?.optionseries_code ?? ''
+      if (linkedFutureCode.value && !series.value.length) {
+        error.value = `Для ${linkedFutureCode.value} нет активных опционных серий`
+      }
     } else if (type === 'futures') {
       const result = await optionCalcApi.getFutures(asset.value.asset_code)
       if (requestId !== instrumentRequestId) return
@@ -210,16 +292,34 @@ async function chooseSecid(secid: string): Promise<void> {
   selectedSecid.value = secid
   if (instrumentType.value === 'option') {
     const option = board.value.find((item) => item.secid === secid)
-    price.value = option ? (optionMarketPrice(option) ?? undefined) : undefined
+    price.value = option ? (selectedOptionPrice(option) ?? undefined) : undefined
     volatility.value = option?.volatility ?? undefined
   } else {
     const future = futures.value.find((item) => item.futures_code === secid)
+    linkedFutureCode.value = secid
     price.value = future?.last ?? future?.settleprice ?? undefined
     if (price.value === undefined) {
       const quote = await getMarketPrice(secid)
       price.value = quote.price ?? undefined
     }
   }
+}
+
+function futuresSearchAliases(value: string): string[] {
+  const normalized = value.trim().toUpperCase().replace(/Ё/g, 'Е')
+  return Array.from(
+    new Set(
+      Object.entries(FUTURES_SEARCH_ALIASES).flatMap(([needle, aliases]) =>
+        normalized.includes(needle) ? aliases : [],
+      ),
+    ),
+  )
+}
+
+function selectedOptionPrice(option: OptionBoardRow): number | null {
+  return optionPriceMode.value === 'market'
+    ? optionMarketPrice(option)
+    : (option.theorprice ?? null)
 }
 
 async function scrollToAtm(): Promise<void> {
@@ -304,6 +404,21 @@ function finish(): void {
               <LoaderCircle v-if="loading" class="spinning" :size="17" />
             </label>
             <div class="asset-results">
+              <div v-if="searchFutures.length" class="search-result-group">Фьючерсы</div>
+              <button
+                v-for="result in searchFutures"
+                :key="`${result.asset.asset_code}:${result.future.futures_code}`"
+                @click="chooseSearchFuture(result)"
+              >
+                <span class="result-code">{{ result.future.futures_code }}</span>
+                <span
+                  ><strong>{{ result.future.shortname || result.asset.title }}</strong
+                  ><small
+                    >Фьючерс · экспирация {{ result.future.expiration_date ?? 'не указана' }}</small
+                  ></span
+                >
+              </button>
+              <div v-if="assets.length" class="search-result-group">Базовые активы</div>
               <button v-for="item in assets" :key="item.asset_code" @click="chooseAsset(item)">
                 <span class="result-code">{{ item.asset_code }}</span>
                 <span
@@ -311,7 +426,10 @@ function finish(): void {
                   ><small>{{ item.asset_type }}</small></span
                 >
               </button>
-              <div v-if="query && !loading && !assets.length && !error" class="empty-search">
+              <div
+                v-if="query && !loading && !assets.length && !searchFutures.length && !error"
+                class="empty-search"
+              >
                 Ничего не найдено
               </div>
             </div>
@@ -355,10 +473,24 @@ function finish(): void {
               </label>
               <div class="option-side-control" aria-label="Тип опциона">
                 <button :class="{ active: optionSide === 'call' }" @click="optionSide = 'call'">
-                  Call
+                  Call <span>{{ optionCounts.call }}</span>
                 </button>
                 <button :class="{ active: optionSide === 'put' }" @click="optionSide = 'put'">
-                  Put
+                  Put <span>{{ optionCounts.put }}</span>
+                </button>
+              </div>
+              <div class="option-price-control" aria-label="Источник цены опциона">
+                <button
+                  :class="{ active: optionPriceMode === 'market' }"
+                  @click="optionPriceMode = 'market'"
+                >
+                  Рыночная
+                </button>
+                <button
+                  :class="{ active: optionPriceMode === 'theoretical' }"
+                  @click="optionPriceMode = 'theoretical'"
+                >
+                  Расчётная
                 </button>
               </div>
               <div class="strike-window-controls">
@@ -379,8 +511,8 @@ function finish(): void {
                   placeholder="Страйк или SECID"
               /></label>
               <div ref="optionListRef" class="option-list strike-list">
-                <div v-if="showingTheoreticalFallback" class="fallback-notice">
-                  Нет ликвидных котировок — показаны страйки с расчётной ценой MOEX
+                <div v-if="optionPriceMode === 'theoretical'" class="fallback-notice">
+                  Используется расчётная цена MOEX для всех выбранных опционов
                 </div>
                 <button
                   v-for="item in filteredBoard"
@@ -397,35 +529,59 @@ function finish(): void {
                     <i></i><small>{{ liquidityText(item) }}</small>
                   </span>
                   <span class="quote">
-                    <strong>{{ formatNumber(optionMarketPrice(item)) }}</strong>
-                    <small
-                      >Расч. {{ formatNumber(item.theorprice) }} · IV
-                      {{ formatNumber(item.volatility) }}%</small
-                    >
+                    <strong>{{ formatNumber(selectedOptionPrice(item)) }}</strong>
+                    <small>
+                      {{ optionPriceMode === 'market' ? 'Рын.' : 'Расч.' }} · IV
+                      {{ formatNumber(item.volatility) }}%
+                    </small>
                   </span>
                   <Check v-if="selectedSecid === item.secid" :size="16" />
                 </button>
                 <div v-if="!loading && !filteredBoard.length" class="empty-options">
-                  Нет {{ optionSide.toUpperCase() }} с расчётной ценой в выбранном диапазоне
+                  <span>
+                    Нет {{ optionSide.toUpperCase() }}
+                    {{
+                      optionPriceMode === 'market'
+                        ? 'с ликвидной рыночной котировкой'
+                        : 'с расчётной ценой'
+                    }}
+                    в выбранном диапазоне
+                  </span>
+                  <button
+                    v-if="optionPriceMode === 'market'"
+                    class="secondary-button"
+                    @click="optionPriceMode = 'theoretical'"
+                  >
+                    Показать расчётные цены
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div v-else-if="instrumentType === 'futures'" class="option-list futures-list">
+            <div v-else-if="instrumentType === 'futures'" class="future-picker">
+              <div class="option-list futures-list">
+                <button
+                  v-for="item in futures"
+                  :key="item.futures_code"
+                  :class="{ selected: selectedSecid === item.futures_code }"
+                  @click="chooseSecid(item.futures_code)"
+                >
+                  <span class="future-contract">
+                    <strong>{{ item.futures_code }}</strong>
+                    <small>Экспирация {{ item.expiration_date ?? 'не указана' }}</small>
+                  </span>
+                  <span v-if="selectedSecid === item.futures_code" class="future-selected">
+                    Выбран · {{ formatNumber(price) }}
+                  </span>
+                  <Check v-if="selectedSecid === item.futures_code" :size="16" />
+                </button>
+              </div>
               <button
-                v-for="item in futures"
-                :key="item.futures_code"
-                :class="{ selected: selectedSecid === item.futures_code }"
-                @click="chooseSecid(item.futures_code)"
+                v-if="linkedFutureCode"
+                class="secondary-button full related-options-button"
+                @click="instrumentType = 'option'"
               >
-                <span class="future-contract">
-                  <strong>{{ item.futures_code }}</strong>
-                  <small>Экспирация {{ item.expiration_date ?? 'не указана' }}</small>
-                </span>
-                <span v-if="selectedSecid === item.futures_code" class="future-selected">
-                  Выбран · {{ formatNumber(price) }}
-                </span>
-                <Check v-if="selectedSecid === item.futures_code" :size="16" />
+                Выбрать опционы на {{ linkedFutureCode }}
               </button>
             </div>
 
