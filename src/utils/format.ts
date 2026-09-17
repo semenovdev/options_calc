@@ -1,4 +1,8 @@
 const numberFormatter = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
+const fixedMoneyFormatter = new Intl.NumberFormat('ru-RU', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
 const compactFormatter = new Intl.NumberFormat('ru-RU', {
   notation: 'compact',
   maximumFractionDigits: 1,
@@ -14,6 +18,12 @@ export function formatMoney(value?: number | null): string {
   return value === null || value === undefined || !Number.isFinite(value)
     ? '—'
     : `${numberFormatter.format(value)} ₽`
+}
+
+export function formatMoneyFixed(value?: number | null): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? '—'
+    : `${fixedMoneyFormatter.format(value)} ₽`
 }
 
 export function formatCompact(value?: number | null): string {

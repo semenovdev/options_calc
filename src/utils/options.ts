@@ -98,3 +98,34 @@ export function splitProfitLossArea(points: IndicatorPoint[]): {
 
   return { profit, loss }
 }
+
+export interface ProfitLossInterval {
+  start: number
+  end: number
+  profit: boolean
+}
+
+export function profitLossIntervals(points: IndicatorPoint[]): ProfitLossInterval[] {
+  const intervals: ProfitLossInterval[] = []
+  const append = (start: number, end: number, profit: boolean) => {
+    if (end <= start) return
+    const previous = intervals[intervals.length - 1]
+    if (previous?.profit === profit && previous.end === start) previous.end = end
+    else intervals.push({ start, end, profit })
+  }
+
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1]!
+    const right = points[index]!
+    if (left.value * right.value < 0) {
+      const ratio = -left.value / (right.value - left.value)
+      const crossing =
+        left.underlying_price + ratio * (right.underlying_price - left.underlying_price)
+      append(left.underlying_price, crossing, left.value >= 0)
+      append(crossing, right.underlying_price, right.value >= 0)
+    } else {
+      append(left.underlying_price, right.underlying_price, (left.value + right.value) / 2 >= 0)
+    }
+  }
+  return intervals
+}

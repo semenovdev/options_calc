@@ -6,6 +6,7 @@ import {
   isLiquidOption,
   niceAxisStep,
   optionsAroundPrice,
+  profitLossIntervals,
   splitProfitLossArea,
 } from './options'
 
@@ -63,6 +64,20 @@ describe('option helpers', () => {
       { underlying_price: 100, value: -20 },
       { underlying_price: 110, value: 0 },
       { underlying_price: 120, value: 0 },
+    ])
+  })
+
+  it('creates continuous payoff zones between break-even points', () => {
+    expect(
+      profitLossIntervals([
+        { underlying_price: 80, value: -20 },
+        { underlying_price: 100, value: 20 },
+        { underlying_price: 120, value: -20 },
+      ]),
+    ).toEqual([
+      { start: 80, end: 90, profit: false },
+      { start: 90, end: 110, profit: true },
+      { start: 110, end: 120, profit: false },
     ])
   })
 })
