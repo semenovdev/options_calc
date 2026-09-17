@@ -50,6 +50,15 @@ export function optionsBySpot(
   return [...below, ...above]
 }
 
+export function spotDividerPosition(
+  options: OptionBoardRow[],
+  underlyingPrice: number | null,
+): number {
+  if (!options.length || !underlyingPrice) return -1
+  const firstBelowSpot = options.findIndex((option) => option.strike <= underlyingPrice)
+  return firstBelowSpot === -1 ? options.length : firstBelowSpot
+}
+
 export function plausibleUnderlyingPrice(
   candidate: number | null | undefined,
   reference: number | null | undefined,

@@ -11,6 +11,7 @@ import {
   plausibleUnderlyingPrice,
   profitLossIntervals,
   sanitizeGreekExpiration,
+  spotDividerPosition,
   splitProfitLossArea,
 } from './options'
 
@@ -41,6 +42,13 @@ describe('option helpers', () => {
     expect(optionsBySpot(options, 100, 2).map((option) => option.strike)).toEqual([
       80, 90, 110, 120,
     ])
+  })
+
+  it('places the spot divider at either edge or inside a descending strike list', () => {
+    const options = [110, 100, 90].map((strike) => ({ secid: String(strike), strike }))
+    expect(spotDividerPosition(options, 120)).toBe(0)
+    expect(spotDividerPosition(options, 105)).toBe(1)
+    expect(spotDividerPosition(options, 80)).toBe(3)
   })
 
   it('rejects an underlying quote in incompatible units', () => {

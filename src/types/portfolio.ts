@@ -15,6 +15,8 @@ export interface Position {
   volatility?: number
   nettedIm: boolean
   expirationDate?: string
+  optionSeriesCode?: string
+  underlyingFutureCode?: string
   strike?: number
   optionType?: 'call' | 'put'
   title?: string

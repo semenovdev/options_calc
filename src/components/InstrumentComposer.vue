@@ -13,6 +13,7 @@ import {
   optionMarketPrice,
   optionSpreadPercent,
   optionsBySpot,
+  spotDividerPosition,
 } from '@/utils/options'
 
 const FUTURES_SEARCH_ALIASES: Record<string, string[]> = {
@@ -20,6 +21,7 @@ const FUTURES_SEARCH_ALIASES: Record<string, string[]> = {
   СБЕР: ['SBRF'],
 }
 
+const props = defineProps<{ useActiveAsset?: boolean }>()
 const open = defineModel<boolean>('open', { required: true })
 const store = usePortfolioStore()
 
@@ -87,6 +89,27 @@ const selectedOption = computed(() =>
 const selectedFuture = computed(() =>
   futures.value.find((item) => item.futures_code === selectedSecid.value),
 )
+const constrainedPositions = computed(() => [
+  ...(props.useActiveAsset ? (store.activeStrategy?.positions ?? []) : []),
+  ...pendingPositions.value,
+])
+const lockedSeriesCode = computed(
+  () => constrainedPositions.value.find((position) => position.optionSeriesCode)?.optionSeriesCode,
+)
+const lockedExpirationDate = computed(
+  () =>
+    constrainedPositions.value.find(
+      (position) => position.type === 'option' && position.expirationDate,
+    )?.expirationDate,
+)
+const lockedFutureCode = computed(
+  () =>
+    constrainedPositions.value.find((position) => position.underlyingFutureCode)
+      ?.underlyingFutureCode ??
+    constrainedPositions.value.find((position) => position.type === 'futures')?.secid ??
+    selectedSeries.value?.futures_code ??
+    undefined,
+)
 const canAdd = computed(() => Boolean(asset.value && selectedSecid.value && quantity.value))
 const atmStrike = computed(() => {
   if (!filteredBoard.value.length || !underlyingPrice.value) return null
@@ -98,9 +121,7 @@ const atmStrike = computed(() => {
   ).strike
 })
 const spotDividerIndex = computed(() => {
-  if (!underlyingPrice.value) return -1
-  const index = filteredBoard.value.findIndex((item) => item.strike <= underlyingPrice.value!)
-  return index > 0 ? index : -1
+  return spotDividerPosition(filteredBoard.value, underlyingPrice.value)
 })
 
 watch(query, (value) => {
@@ -199,6 +220,19 @@ watch([optionSide, optionPriceMode], () => {
   void scrollToAtm()
 })
 
+watch(open, async (isOpen) => {
+  if (!isOpen) return
+  reset()
+  const strategy = store.activeStrategy
+  if (!props.useActiveAsset || !strategy?.positions.length) return
+
+  await chooseAsset({
+    asset_code: strategy.assetCode,
+    asset_type: strategy.assetType,
+    title: strategy.positions[0]?.title || strategy.assetCode,
+  })
+})
+
 function reset(): void {
   step.value = 'asset'
   query.value = ''
@@ -220,6 +254,7 @@ function reset(): void {
   price.value = undefined
   volatility.value = undefined
   error.value = null
+  pendingPositions.value = []
 }
 
 function close(): void {
@@ -231,7 +266,7 @@ async function chooseAsset(value: Asset): Promise<void> {
   asset.value = value
   linkedFutureCode.value = ''
   step.value = 'instrument'
-  instrumentType.value = value.asset_type === 'futures' ? 'futures' : 'option'
+  instrumentType.value = 'option'
   await loadInstruments(instrumentType.value)
 }
 
@@ -263,7 +298,13 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
     if (type === 'option') {
       const result = await optionCalcApi.getSeries(asset.value.asset_code, asset.value.asset_type)
       if (requestId !== instrumentRequestId) return
-      const activeSeries = result.filter((item) => item.expiration_date >= todayMoscow())
+      const activeSeries = result.filter(
+        (item) =>
+          item.expiration_date >= todayMoscow() &&
+          (!lockedSeriesCode.value || item.optionseries_code === lockedSeriesCode.value) &&
+          (!lockedExpirationDate.value || item.expiration_date === lockedExpirationDate.value) &&
+          (!lockedFutureCode.value || item.futures_code === lockedFutureCode.value),
+      )
       series.value = linkedFutureCode.value
         ? activeSeries.filter((item) => item.futures_code === linkedFutureCode.value)
         : activeSeries
@@ -275,7 +316,9 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
     } else if (type === 'futures') {
       const result = await optionCalcApi.getFutures(asset.value.asset_code)
       if (requestId !== instrumentRequestId) return
-      futures.value = result
+      futures.value = lockedFutureCode.value
+        ? result.filter((item) => item.futures_code === lockedFutureCode.value)
+        : result
     } else {
       selectedSecid.value = asset.value.asset_code
       const quote = await getMarketPrice(asset.value.asset_code)
@@ -340,6 +383,24 @@ function add(): void {
   if (!asset.value || !canAdd.value) return
   const option = selectedOption.value
   const future = selectedFuture.value
+  const expirationDate =
+    option?.expiration_date ?? selectedSeries.value?.expiration_date ?? future?.expiration_date
+  if (
+    instrumentType.value === 'option' &&
+    lockedExpirationDate.value &&
+    expirationDate !== lockedExpirationDate.value
+  ) {
+    error.value = `В стратегии уже выбрана экспирация ${lockedExpirationDate.value}`
+    return
+  }
+  if (
+    lockedFutureCode.value &&
+    instrumentType.value === 'futures' &&
+    selectedSecid.value !== lockedFutureCode.value
+  ) {
+    error.value = `В стратегии уже выбран фьючерс ${lockedFutureCode.value}`
+    return
+  }
   pendingPositions.value.push({
     secid: selectedSecid.value,
     type: instrumentType.value,
@@ -347,8 +408,11 @@ function add(): void {
     price: price.value,
     volatility: volatility.value,
     nettedIm: true,
-    expirationDate:
-      option?.expiration_date ?? selectedSeries.value?.expiration_date ?? future?.expiration_date,
+    expirationDate,
+    optionSeriesCode: option ? selectedSeries.value?.optionseries_code : undefined,
+    underlyingFutureCode: option
+      ? (selectedSeries.value?.futures_code ?? undefined)
+      : future?.futures_code,
     strike: option?.strike,
     optionType: option?.option_type,
     title: asset.value.title,
@@ -360,10 +424,10 @@ function add(): void {
 
 function finish(): void {
   if (!asset.value || !pendingPositions.value.length) return
-  let strategy = store.activeStrategy
+  const strategy = store.activeStrategy
   if (strategy && strategy.positions.length && strategy.assetCode !== asset.value.asset_code) {
-    store.addStrategy()
-    strategy = store.activeStrategy
+    error.value = 'В одной стратегии можно использовать только один базовый актив'
+    return
   }
   if (!strategy) return
   strategy.assetCode = asset.value.asset_code
@@ -462,7 +526,10 @@ function finish(): void {
             <div v-if="instrumentType === 'option'" class="instrument-picker">
               <label class="field-label"
                 >Экспирация
-                <select v-model="selectedSeriesCode">
+                <select
+                  v-model="selectedSeriesCode"
+                  :disabled="Boolean(lockedSeriesCode || lockedExpirationDate)"
+                >
                   <option
                     v-for="item in series"
                     :key="item.optionseries_code"
@@ -548,6 +615,9 @@ function finish(): void {
                     <Check v-if="selectedSecid === item.secid" :size="16" />
                   </button>
                 </template>
+                <div v-if="spotDividerIndex === filteredBoard.length" class="spot-divider">
+                  <span>Spot {{ formatNumber(underlyingPrice) }}</span>
+                </div>
                 <div v-if="!loading && !filteredBoard.length" class="empty-options">
                   <span>
                     Нет {{ optionSide.toUpperCase() }}
@@ -623,7 +693,9 @@ function finish(): void {
             <span v-if="pendingPositions.length" class="pending-count">
               В наборе: {{ pendingPositions.length }}
             </span>
-            <button class="secondary-button" @click="step = 'asset'">Назад</button>
+            <button v-if="!props.useActiveAsset" class="secondary-button" @click="step = 'asset'">
+              Назад
+            </button>
             <button class="primary-button" :disabled="!canAdd || loading" @click="add">
               Добавить позицию
             </button>

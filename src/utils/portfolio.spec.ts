@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Strategy } from '@/types/portfolio'
+import { todayMoscow } from './format'
 import { mergePosition, toPortfolioRequest } from './portfolio'
 
 const strategy: Strategy = {
@@ -45,6 +46,29 @@ describe('toPortfolioRequest', () => {
   it('can calculate an isolated position', () => {
     const payload = toPortfolioRequest(strategy, [])
     expect(payload.positions).toEqual([])
+  })
+
+  it('omits what_if when neither scenario parameter is set', () => {
+    const payload = toPortfolioRequest({
+      ...strategy,
+      calculationDate: '',
+      volatilityShift: 0,
+    })
+
+    expect(payload).not.toHaveProperty('what_if')
+  })
+
+  it('adds the current date when volatility shift is set without a date', () => {
+    const payload = toPortfolioRequest({
+      ...strategy,
+      calculationDate: '',
+      volatilityShift: 3,
+    })
+
+    expect(payload.what_if).toEqual({
+      date_of_calculation: todayMoscow(),
+      delta_sigma: 3,
+    })
   })
 })
 

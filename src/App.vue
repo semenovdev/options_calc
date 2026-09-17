@@ -13,8 +13,14 @@ import { exportStrategyCsv, exportStrategyJson } from '@/utils/export'
 
 const store = usePortfolioStore()
 const composerOpen = ref(false)
+const composerUsesActiveAsset = ref(false)
 const hasPositions = computed(() => Boolean(store.activeStrategy?.positions.length))
 let refreshTimer: ReturnType<typeof globalThis.setInterval> | undefined
+
+function openComposer(useActiveAsset: boolean): void {
+  composerUsesActiveAsset.value = useActiveAsset
+  composerOpen.value = true
+}
 
 function refreshActiveStrategy(): void {
   if (
@@ -75,7 +81,12 @@ onBeforeUnmount(() => globalThis.clearInterval(refreshTimer))
         >
           <FileJson :size="17" />
         </button>
-        <button class="primary-button" @click="composerOpen = true">
+        <button
+          class="primary-button"
+          :disabled="!store.activeStrategy || hasPositions"
+          :title="hasPositions ? 'Базовый актив стратегии уже выбран' : 'Добавить инструмент'"
+          @click="openComposer(false)"
+        >
           <Plus :size="16" /> Добавить инструмент
         </button>
       </div>
@@ -112,13 +123,13 @@ onBeforeUnmount(() => globalThis.clearInterval(refreshTimer))
           {{ store.calculation.error }}
         </div>
 
-        <PositionTable @add="composerOpen = true" />
+        <PositionTable @add="openComposer(hasPositions)" />
         <MarketWorkspace />
       </section>
 
       <SummaryPanel />
     </main>
 
-    <InstrumentComposer v-model:open="composerOpen" />
+    <InstrumentComposer v-model:open="composerOpen" :use-active-asset="composerUsesActiveAsset" />
   </div>
 </template>

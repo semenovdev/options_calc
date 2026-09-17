@@ -1,10 +1,14 @@
 import type { PortfolioRequest } from '@/types/moex'
 import type { Position, Strategy } from '@/types/portfolio'
+import { todayMoscow } from './format'
 
 export function toPortfolioRequest(
   strategy: Strategy,
   positions = strategy.positions,
 ): PortfolioRequest {
+  const deltaSigma = strategy.volatilityShift || undefined
+  const calculationDate = strategy.calculationDate || (deltaSigma ? todayMoscow() : undefined)
+
   return {
     asset_code: strategy.assetCode,
     asset_type: strategy.assetType,
@@ -16,10 +20,14 @@ export function toPortfolioRequest(
       volatility: position.volatility,
       netted_im: position.nettedIm,
     })),
-    what_if: {
-      date_of_calculation: strategy.calculationDate || undefined,
-      delta_sigma: strategy.volatilityShift || undefined,
-    },
+    ...(calculationDate
+      ? {
+          what_if: {
+            date_of_calculation: calculationDate,
+            delta_sigma: deltaSigma,
+          },
+        }
+      : {}),
   }
 }
 
