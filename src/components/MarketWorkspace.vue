@@ -310,6 +310,19 @@ function liquidityClass(row: OptionBoardRow): string {
   return 'good'
 }
 
+async function updateMarketPrice(
+  strategy: NonNullable<typeof store.activeStrategy>,
+  optionSeries?: OptionSeries,
+): Promise<void> {
+  const quoteSecid = optionSeries?.futures_code || strategy.assetCode
+  try {
+    strategy.marketPrice =
+      (await getMarketPrice(quoteSecid)).price ?? optionSeries?.central_strike ?? null
+  } catch {
+    strategy.marketPrice = optionSeries?.central_strike ?? null
+  }
+}
+
 async function loadMarketData(): Promise<void> {
   const strategy = store.activeStrategy
   if (!strategy) return
@@ -320,14 +333,13 @@ async function loadMarketData(): Promise<void> {
       (item) => item.expiration_date >= todayMoscow(),
     )
     series.value.sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
-    if (!series.value.some((item) => item.optionseries_code === selectedSeriesCode.value)) {
-      selectedSeriesCode.value = series.value[0]?.optionseries_code ?? ''
-    }
-    try {
-      strategy.marketPrice = (await getMarketPrice(strategy.assetCode)).price
-    } catch {
-      strategy.marketPrice = null
-    }
+    const positionExpiration = strategy.positions.find(
+      (position) => position.type === 'option' && position.expirationDate,
+    )?.expirationDate
+    const preferredSeries =
+      series.value.find((item) => item.expiration_date === positionExpiration) ?? series.value[0]
+    selectedSeriesCode.value = preferredSeries?.optionseries_code ?? ''
+    await updateMarketPrice(strategy, preferredSeries)
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки рыночных данных'
   } finally {
@@ -358,14 +370,7 @@ async function loadSeriesData(): Promise<void> {
     if (boardResult.status === 'rejected' && smileResult.status === 'rejected') {
       throw boardResult.reason
     }
-    const currentSeries = selectedSeries.value
-    const quoteSecid = currentSeries?.futures_code || strategy.assetCode
-    try {
-      strategy.marketPrice =
-        (await getMarketPrice(quoteSecid)).price ?? currentSeries?.central_strike
-    } catch {
-      strategy.marketPrice = currentSeries?.central_strike ?? null
-    }
+    await updateMarketPrice(strategy, selectedSeries.value)
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
   } finally {

@@ -36,6 +36,20 @@ export function optionsAroundPrice(
   return sorted.slice(Math.max(0, atmIndex - below), atmIndex + above + 1)
 }
 
+export function optionsBySpot(
+  options: OptionBoardRow[],
+  underlyingPrice: number | null,
+  limitPerSide: number,
+): OptionBoardRow[] {
+  const sorted = [...options].sort((left, right) => left.strike - right.strike)
+  const limit = Math.max(0, Math.floor(limitPerSide))
+  if (!sorted.length || !underlyingPrice) return sorted.slice(0, limit * 2)
+
+  const below = sorted.filter((option) => option.strike <= underlyingPrice).slice(-limit)
+  const above = sorted.filter((option) => option.strike > underlyingPrice).slice(0, limit)
+  return [...below, ...above]
+}
+
 export function niceAxisStep(range: number, targetSplits = 6): number {
   if (!Number.isFinite(range) || range <= 0) return 1
   const rough = range / targetSplits

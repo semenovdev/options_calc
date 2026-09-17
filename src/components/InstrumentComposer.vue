@@ -12,7 +12,7 @@ import {
   isLiquidOption,
   optionMarketPrice,
   optionSpreadPercent,
-  optionsAroundPrice,
+  optionsBySpot,
 } from '@/utils/options'
 
 const FUTURES_SEARCH_ALIASES: Record<string, string[]> = {
@@ -76,14 +76,8 @@ const filteredBoard = computed(() => {
     (item) =>
       !needle || item.secid.toLowerCase().includes(needle) || String(item.strike).includes(needle),
   )
-  if (needle) return matching.slice(0, 40)
-
   const range = Number.isFinite(strikeRange.value) ? Math.max(0, strikeRange.value) : 5
-  if (matching.length <= range * 2 + 1) {
-    return [...matching].sort((left, right) => left.strike - right.strike)
-  }
-
-  return optionsAroundPrice(matching, underlyingPrice.value, range, range)
+  return optionsBySpot(matching, underlyingPrice.value, range)
 })
 const selectedOption = computed(() =>
   board.value.find((item) => item.secid === selectedSecid.value),
@@ -100,6 +94,11 @@ const atmStrike = computed(() => {
       ? item
       : closest,
   ).strike
+})
+const spotDividerIndex = computed(() => {
+  if (!underlyingPrice.value) return -1
+  const index = filteredBoard.value.findIndex((item) => item.strike > underlyingPrice.value!)
+  return index > 0 ? index : -1
 })
 
 watch(query, (value) => {
@@ -511,32 +510,42 @@ function finish(): void {
                   placeholder="Страйк или SECID"
               /></label>
               <div ref="optionListRef" class="option-list strike-list">
-                <div v-if="optionPriceMode === 'theoretical'" class="fallback-notice">
-                  Используется расчётная цена MOEX для всех выбранных опционов
-                </div>
-                <button
-                  v-for="item in filteredBoard"
-                  :key="item.secid"
-                  :class="{ selected: selectedSecid === item.secid }"
-                  :data-atm="item.strike === atmStrike"
-                  @click="chooseSecid(item.secid)"
-                >
-                  <span class="strike-primary">
-                    <strong>{{ formatNumber(item.strike) }}</strong>
-                    <small>{{ item.secid }}</small>
-                  </span>
-                  <span class="liquidity-mark" :class="{ theoretical: !isLiquidOption(item) }">
-                    <i></i><small>{{ liquidityText(item) }}</small>
-                  </span>
-                  <span class="quote">
-                    <strong>{{ formatNumber(selectedOptionPrice(item)) }}</strong>
-                    <small>
-                      {{ optionPriceMode === 'market' ? 'Рын.' : 'Расч.' }} · IV
-                      {{ formatNumber(item.volatility) }}%
-                    </small>
-                  </span>
-                  <Check v-if="selectedSecid === item.secid" :size="16" />
-                </button>
+                <template v-for="(item, index) in filteredBoard" :key="item.secid">
+                  <div v-if="index === spotDividerIndex" class="spot-divider">
+                    <span>Spot {{ formatNumber(underlyingPrice) }}</span>
+                  </div>
+                  <button
+                    :class="{ selected: selectedSecid === item.secid }"
+                    :data-atm="item.strike === atmStrike"
+                    @click="chooseSecid(item.secid)"
+                  >
+                    <span class="strike-primary">
+                      <strong>{{ formatNumber(item.strike) }}</strong>
+                      <small>{{ item.secid }}</small>
+                    </span>
+                    <span
+                      class="liquidity-mark"
+                      :class="{ theoretical: optionPriceMode === 'theoretical' }"
+                    >
+                      <i></i>
+                      <small>{{
+                        optionPriceMode === 'market' ? liquidityText(item) : 'Расчёт MOEX'
+                      }}</small>
+                    </span>
+                    <span class="quote" :class="{ comparison: optionPriceMode === 'market' }">
+                      <span v-if="optionPriceMode === 'market'" class="quote-value">
+                        <small>Рынок</small>
+                        <strong>{{ formatNumber(optionMarketPrice(item)) }}</strong>
+                      </span>
+                      <span class="quote-value">
+                        <small>Расчёт</small>
+                        <strong>{{ formatNumber(item.theorprice) }}</strong>
+                      </span>
+                      <small class="quote-iv">IV {{ formatNumber(item.volatility) }}%</small>
+                    </span>
+                    <Check v-if="selectedSecid === item.secid" :size="16" />
+                  </button>
+                </template>
                 <div v-if="!loading && !filteredBoard.length" class="empty-options">
                   <span>
                     Нет {{ optionSide.toUpperCase() }}
@@ -547,13 +556,6 @@ function finish(): void {
                     }}
                     в выбранном диапазоне
                   </span>
-                  <button
-                    v-if="optionPriceMode === 'market'"
-                    class="secondary-button"
-                    @click="optionPriceMode = 'theoretical'"
-                  >
-                    Показать расчётные цены
-                  </button>
                 </div>
               </div>
             </div>
@@ -598,7 +600,11 @@ function finish(): void {
                   v-model.number="price"
                   type="number"
                   step="any"
-                  placeholder="Рыночная"
+                  :placeholder="
+                    instrumentType === 'option' && optionPriceMode === 'theoretical'
+                      ? 'Расчётная'
+                      : 'Рыночная'
+                  "
               /></label>
               <label class="field-label"
                 >Волатильность, %<input

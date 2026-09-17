@@ -1099,6 +1099,30 @@ th {
 .strike-list button {
   min-height: 56px;
 }
+.spot-divider {
+  position: relative;
+  height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--amber);
+  font:
+    600 8px 'IBM Plex Mono',
+    monospace;
+}
+.spot-divider::before {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(240, 180, 77, 0.45);
+  content: '';
+}
+.spot-divider span {
+  z-index: 1;
+  padding: 0 8px;
+  background: var(--panel);
+}
 .strike-primary strong {
   color: var(--text);
   font-size: 15px;
@@ -1126,17 +1150,6 @@ th {
 .liquidity-mark.theoretical small {
   color: #c9aa72;
 }
-.fallback-notice {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 8px 10px;
-  border: 1px solid rgba(240, 180, 77, 0.24);
-  border-radius: 4px;
-  background: #1d1b16;
-  color: #d5b77f;
-  font-size: 9px;
-}
 .liquidity-mark small {
   margin: 0;
   color: #9fbaaf;
@@ -1159,6 +1172,24 @@ th {
 }
 .quote {
   text-align: right;
+}
+.quote.comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+}
+.quote-value {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.quote-value small,
+.quote-iv {
+  color: var(--muted);
+  font-size: 8px;
+}
+.quote-iv {
+  grid-column: 1 / -1;
 }
 .future-picker {
   min-height: 0;

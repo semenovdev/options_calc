@@ -7,6 +7,7 @@ import {
   niceAxisStep,
   optionMarketPrice,
   optionsAroundPrice,
+  optionsBySpot,
   profitLossIntervals,
   splitProfitLossArea,
 } from './options'
@@ -27,6 +28,16 @@ describe('option helpers', () => {
     const options = [80, 90, 100, 110, 120].map((strike) => ({ secid: String(strike), strike }))
     expect(optionsAroundPrice(options, 103, 1, 2).map((option) => option.strike)).toEqual([
       90, 100, 110, 120,
+    ])
+  })
+
+  it('limits strikes independently below and above spot', () => {
+    const options = [70, 80, 90, 110, 120, 130].map((strike) => ({
+      secid: String(strike),
+      strike,
+    }))
+    expect(optionsBySpot(options, 100, 2).map((option) => option.strike)).toEqual([
+      80, 90, 110, 120,
     ])
   })
 
