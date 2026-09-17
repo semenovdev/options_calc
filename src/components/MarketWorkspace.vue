@@ -223,13 +223,12 @@ const profileOption = computed<EChartsOption>(() => {
         lineStyle: { width: 2, color: '#45d2a4' },
         itemStyle: { color: '#45d2a4' },
         tooltip: { valueFormatter: tooltipValueFormatter },
-        markLine,
         z: 2,
       },
       ...(indicator.value === 'profit_and_loss'
         ? [
             {
-              name: 'Сейчас: убыток',
+              name: 'Сейчас',
               type: 'line' as const,
               data: currentLossSegment,
               showSymbol: false,
@@ -261,6 +260,24 @@ const profileOption = computed<EChartsOption>(() => {
               lineStyle: { width: 2, color: '#d592ff', type: 'dashed' as const },
               itemStyle: { color: '#d592ff' },
               tooltip: { valueFormatter: tooltipValueFormatter },
+            },
+          ]
+        : []),
+      ...(markLine
+        ? [
+            {
+              name: 'Базовый актив',
+              type: 'line' as const,
+              data: [
+                [bounds.minimum, 0],
+                [bounds.maximum, 0],
+              ],
+              showSymbol: false,
+              silent: true,
+              tooltip: { show: false },
+              lineStyle: { opacity: 0 },
+              markLine,
+              z: 3,
             },
           ]
         : []),
