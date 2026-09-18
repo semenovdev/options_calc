@@ -23,8 +23,27 @@ npm install
 npm run dev
 ```
 
-Vite проксирует запросы `/moex-option-calc` и `/moex-iss` на `https://iss.moex.com`,
-поэтому для production-развёртывания эти маршруты также должны быть настроены на reverse proxy.
+Адрес Option Calc API задаётся в `.env`:
+
+```sh
+# Встроенный Vite proxy на оригинальный MOEX API (значение по умолчанию)
+VITE_OPTION_CALC_BASE_URL=/moex-option-calc
+
+# Локальный Rust backend
+VITE_OPTION_CALC_BASE_URL=http://127.0.0.1:3000
+```
+
+После изменения `.env` перезапустите Vite. Завершающий `/` необязателен. При прямом
+подключении по другому origin Rust backend должен разрешать origin фронтенда через CORS.
+Vite продолжает проксировать `/moex-option-calc` на `https://iss.moex.com`; маршрут
+`/moex-iss`, используемый для рыночных данных ISS, остаётся без изменений.
+
+Для локального Rust backend без CORS используйте Vite proxy:
+
+```sh
+VITE_OPTION_CALC_BASE_URL=/moex-option-calc
+VITE_OPTION_CALC_PROXY_TARGET=http://127.0.0.1:8080
+```
 
 ## Проверки
 
