@@ -51,8 +51,22 @@ VITE_OPTION_CALC_PROXY_TARGET=http://127.0.0.1:8080
 npm run type-check
 npm run lint
 npm test
+npm run test:e2e
 npm run build
 ```
+
+E2E-тесты используют Playwright Chromium и реальные API без подмены ответов. Опционные
+стратегии создаются по расчётным ценам. `npm run test:e2e:moex` проверяет оригинальный
+MOEX Option Calc, `npm run test:e2e:rust` запускает Rust backend и тот же набор сценариев,
+а `npm run test:e2e` последовательно выполняет оба режима. Путь к backend можно изменить
+через `E2E_RUST_BACKEND_DIR`. Для первого запуска установите браузер:
+`npx playwright install chromium`.
+
+Полная проверка каталога помечена `@catalog`: она последовательно перебирает все
+актуальные базовые активы, серии, Call и Put из MOEX и ищет их в интерфейсе. Её можно
+запускать отдельно командами `npm run test:e2e:catalog:moex` и
+`npm run test:e2e:catalog:rust`. Более короткие миграционные прогоны без полного
+каталога: `npm run test:e2e:core:moex` и `npm run test:e2e:core:rust`.
 
 Все зависимости имеют open-source лицензии. Сводка находится в
 [`THIRD_PARTY_LICENSES.md`](./THIRD_PARTY_LICENSES.md).
