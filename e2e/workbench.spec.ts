@@ -1,22 +1,7 @@
-import {
-  expect,
-  request as playwrightRequest,
-  test,
-  type Page,
-  type Request,
-} from '@playwright/test'
+import { expect, test, type Page, type Request } from '@playwright/test'
 
-import {
-  BACKEND_MODE,
-  discoverLiveCase,
-  optionBoard,
-  optionSecids,
-  REFERENCE_API,
-  referenceCatalog,
-  targetCatalog,
-  TARGET_API_PREFIX,
-  type LiveCase,
-} from './liveApi'
+import { discoverLiveCase, type LiveCase } from './liveApi'
+import { MOEX_OPTION_UNDERLYINGS } from './fixtures/moexUnderlyings'
 
 interface ObservedApi {
   portfolioRequests: Record<string, unknown>[]
@@ -198,109 +183,30 @@ test('renders volatility smile and every P&L/Greeks graph', async ({ page }) => 
   )
 })
 
-test('@catalog all MOEX underlyings and options are searchable and exposed by the target', async ({
+test('@catalog snapshotted MOEX option underlyings are searchable through the target', async ({
   page,
 }) => {
-  test.setTimeout(1_200_000)
+  test.setTimeout(180_000)
   await page.goto('/')
-  const reference = await referenceCatalog()
-  const target = await targetCatalog(page)
-  const targetKeys = new Set(
-    target.map((entry) => `${entry.asset.asset_type}:${entry.asset.asset_code}`),
-  )
-  const missingAssets = reference
-    .map((entry) => `${entry.asset.asset_type}:${entry.asset.asset_code}`)
-    .filter((key) => !targetKeys.has(key))
-
   await page.getByRole('button', { name: 'Добавить инструмент' }).click()
   const dialog = page.getByRole('dialog', { name: 'Добавить инструмент' })
   const search = dialog.getByPlaceholder('Тикер или название, например SBER или Si')
   const missingInSearch: string[] = []
-  for (const entry of reference) {
-    await search.fill(entry.asset.asset_code)
-    await page.waitForTimeout(400)
-    const found = dialog.locator('.result-code').getByText(entry.asset.asset_code, { exact: true })
-    if ((await found.count()) === 0)
-      missingInSearch.push(`${entry.asset.asset_type}:${entry.asset.asset_code}`)
-  }
-
-  const referenceRequest = await playwrightRequest.newContext()
-  const missingOptions: string[] = []
-  const missingOptionsInSearch: string[] = []
-  try {
-    for (const referenceEntry of reference) {
-      const targetEntry = target.find(
-        (entry) =>
-          entry.asset.asset_code === referenceEntry.asset.asset_code &&
-          entry.asset.asset_type === referenceEntry.asset.asset_type,
-      )
-      if (!targetEntry) continue
-      const referenceSecids = await optionSecids(referenceRequest, REFERENCE_API, referenceEntry)
-      const targetSecids =
-        BACKEND_MODE === 'moex'
-          ? referenceSecids
-          : await optionSecids(page.request, TARGET_API_PREFIX, targetEntry)
-      for (const [seriesCode, secids] of referenceSecids) {
-        const available = new Set(targetSecids.get(seriesCode) ?? [])
-        secids
-          .filter((secid) => !available.has(secid))
-          .forEach((secid) => missingOptions.push(`${seriesCode}:${secid}`))
-      }
-
-      await search.fill(referenceEntry.asset.asset_code)
-      await page.waitForTimeout(400)
-      await dialog
-        .locator('.asset-results button')
-        .filter({
-          has: dialog
-            .locator('.result-code')
-            .getByText(referenceEntry.asset.asset_code, { exact: true }),
-        })
-        .last()
-        .click()
-      await expect(dialog.getByLabel('Экспирация')).toBeVisible()
-      await dialog.getByRole('button', { name: 'Расчётная' }).click()
-      for (const series of targetEntry.series) {
-        const referenceSeries = referenceEntry.series.find(
-          (candidate) => candidate.optionseries_code === series.optionseries_code,
-        )
-        if (!referenceSeries) continue
-        await dialog.getByLabel('Экспирация').selectOption(series.optionseries_code)
-        const board = await optionBoard(
-          referenceRequest,
-          REFERENCE_API,
-          referenceEntry,
-          referenceSeries,
-        )
-        for (const [kind, rows] of [
-          ['Call', board.call],
-          ['Put', board.put],
-        ] as const) {
-          await dialog.getByRole('button', { name: new RegExp(`^${kind}`) }).click()
-          for (const row of rows) {
-            await dialog.getByPlaceholder('Страйк или SECID').fill(row.secid)
-            if ((await dialog.getByText(row.secid, { exact: true }).count()) === 0) {
-              missingOptionsInSearch.push(`${series.optionseries_code}:${row.secid}`)
-            }
-          }
-        }
-      }
-      await dialog.getByRole('button', { name: 'Назад' }).click()
+  for (const [assetCode, assetType] of MOEX_OPTION_UNDERLYINGS) {
+    await search.fill(assetCode)
+    await page.waitForTimeout(300)
+    await expect(dialog.locator('.spinning')).toHaveCount(0, { timeout: 5_000 })
+    const found = dialog
+      .locator('.result-code')
+      .getByText(assetCode, { exact: true })
+      .locator('..')
+      .filter({ hasText: assetType })
+    if ((await found.count()) === 0) {
+      missingInSearch.push(`${assetType}:${assetCode}`)
     }
-  } finally {
-    await referenceRequest.dispose()
   }
 
-  expect(missingAssets, `Missing option underlyings: ${missingAssets.join(', ')}`).toEqual([])
   expect(missingInSearch, `Underlyings absent in UI search: ${missingInSearch.join(', ')}`).toEqual(
     [],
   )
-  expect(
-    missingOptions,
-    `Option SECIDs absent from target: ${missingOptions.slice(0, 50).join(', ')}`,
-  ).toEqual([])
-  expect(
-    missingOptionsInSearch,
-    `Option SECIDs absent from UI search: ${missingOptionsInSearch.slice(0, 50).join(', ')}`,
-  ).toEqual([])
 })

@@ -62,8 +62,9 @@ MOEX Option Calc, `npm run test:e2e:rust` запускает Rust backend и т�
 через `E2E_RUST_BACKEND_DIR`. Для первого запуска установите браузер:
 `npx playwright install chromium`.
 
-Полная проверка каталога помечена `@catalog`: она последовательно перебирает все
-актуальные базовые активы, серии, Call и Put из MOEX и ищет их в интерфейсе. Её можно
+Проверка каталога помечена `@catalog`: она перебирает зафиксированный снимок всех
+базовых активов MOEX Option Calc и ищет их в интерфейсе. Серии и SECID опционов в
+снимок намеренно не входят, поскольку они экспирируются. Тест можно
 запускать отдельно командами `npm run test:e2e:catalog:moex` и
 `npm run test:e2e:catalog:rust`. Более короткие миграционные прогоны без полного
 каталога: `npm run test:e2e:core:moex` и `npm run test:e2e:core:rust`.

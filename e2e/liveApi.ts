@@ -1,9 +1,6 @@
-import { request as playwrightRequest, type APIRequestContext, type Page } from '@playwright/test'
+import type { APIRequestContext, Page } from '@playwright/test'
 
 export const TARGET_API_PREFIX = '/moex-option-calc'
-export const REFERENCE_API =
-  process.env.E2E_REFERENCE_API ?? 'https://iss.moex.com/iss/apps/option-calc/v1'
-export const BACKEND_MODE = process.env.E2E_BACKEND ?? 'moex'
 
 export interface Asset {
   asset_code: string
@@ -119,7 +116,7 @@ export async function catalogFrom(
   request: APIRequestContext,
   prefix = '',
 ): Promise<CatalogEntry[]> {
-  const assets = await getJson<Asset[]>(request, endpoint(prefix, 'assets'))
+  const assets = await assetsFrom(request, prefix)
   const uniqueAssets = Array.from(
     new Map(assets.map((asset) => [`${asset.asset_type}:${asset.asset_code}`, asset])).values(),
   )
@@ -137,19 +134,8 @@ export async function catalogFrom(
   return entries.filter((entry) => entry.series.length)
 }
 
-let referenceCatalogPromise: Promise<CatalogEntry[]> | undefined
-
-export function referenceCatalog(): Promise<CatalogEntry[]> {
-  referenceCatalogPromise ??= playwrightRequest
-    .newContext({ extraHTTPHeaders: { Accept: 'application/json' } })
-    .then(async (request) => {
-      try {
-        return await catalogFrom(request, REFERENCE_API)
-      } finally {
-        await request.dispose()
-      }
-    })
-  return referenceCatalogPromise
+export function assetsFrom(request: APIRequestContext, prefix = ''): Promise<Asset[]> {
+  return getJson<Asset[]>(request, endpoint(prefix, 'assets'))
 }
 
 export async function targetCatalog(page: Page): Promise<CatalogEntry[]> {
@@ -196,20 +182,4 @@ export function discoverLiveCase(page: Page): Promise<LiveCase> {
     throw new Error('No active option series with theoretical Call and Put prices was found')
   })()
   return liveCasePromise
-}
-
-export async function optionSecids(
-  request: APIRequestContext,
-  prefix: string,
-  entry: CatalogEntry,
-): Promise<Map<string, string[]>> {
-  const result = new Map<string, string[]>()
-  await mapLimit(entry.series, 1, async (series) => {
-    const board = await optionBoard(request, prefix, entry, series)
-    result.set(
-      series.optionseries_code,
-      [...board.call, ...board.put].map((row) => row.secid).sort(),
-    )
-  })
-  return result
 }
