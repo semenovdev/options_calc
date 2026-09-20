@@ -396,7 +396,11 @@ function handleLegendSelection(event: { selected?: Record<string, boolean> }): v
   if (selected !== undefined) scenarioVisible.value = selected
 }
 
-watch(() => store.activeId, loadMarketData, { immediate: true })
+watch(
+  () => [store.activeId, store.activeStrategy?.assetCode, store.activeStrategy?.assetType],
+  loadMarketData,
+  { immediate: true },
+)
 watch(selectedSeriesCode, loadSeriesData)
 </script>
 
@@ -440,7 +444,7 @@ watch(selectedSeriesCode, loadSeriesData)
           Базовый <strong>{{ formatNumber(chartBounds.spot) }}</strong>
         </span>
       </div>
-      <div v-if="currentGraph?.now.length" class="chart-frame">
+      <div v-if="currentGraph?.now.length" class="chart-frame" data-testid="profile-chart">
         <VChart :option="profileOption" autoresize @legendselectchanged="handleLegendSelection" />
       </div>
       <div v-else class="chart-empty">
@@ -451,7 +455,9 @@ watch(selectedSeriesCode, loadSeriesData)
     </template>
 
     <template v-else-if="activeTab === 'smile'">
-      <div v-if="smile.length" class="chart-frame"><VChart :option="smileOption" autoresize /></div>
+      <div v-if="smile.length" class="chart-frame" data-testid="smile-chart">
+        <VChart :option="smileOption" autoresize />
+      </div>
       <div v-else class="chart-empty">
         <BarChart3 :size="28" /><strong>Нет данных по улыбке</strong
         ><span>Выберите другую серию</span>
