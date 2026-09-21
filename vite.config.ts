@@ -18,6 +18,11 @@ export default defineConfig(({ mode }) => {
         '/moex-option-calc': {
           target: optionCalcProxyTarget,
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('proxyRes', (response) => {
+              delete response.headers['set-cookie']
+            })
+          },
           rewrite: (path) =>
             path.replace(
               /^\/moex-option-calc/,
@@ -27,6 +32,11 @@ export default defineConfig(({ mode }) => {
         '/moex-iss': {
           target: 'https://iss.moex.com',
           changeOrigin: true,
+          configure: (proxy) => {
+            proxy.on('proxyRes', (response) => {
+              delete response.headers['set-cookie']
+            })
+          },
           rewrite: (path) => path.replace(/^\/moex-iss/, '/iss'),
         },
       },

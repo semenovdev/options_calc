@@ -74,7 +74,14 @@ const baseChartStyle: EChartsOption = {
   backgroundColor: 'transparent',
   animationDuration: 350,
   textStyle: { fontFamily: 'Inter, Arial, sans-serif', color: '#9ba5b4' },
-  grid: { left: 14, right: 24, top: 36, bottom: 28, containLabel: true },
+  grid: {
+    left: 14,
+    right: 24,
+    top: 36,
+    bottom: 28,
+    outerBoundsMode: 'same',
+    outerBoundsContain: 'axisLabel',
+  },
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'cross', lineStyle: { color: '#748195', type: 'dashed' } },
