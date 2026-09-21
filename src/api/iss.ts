@@ -30,7 +30,10 @@ function positiveNumber(value: unknown): number | null {
   return number !== null && number > 0 ? number : null
 }
 
-function currentPrice(row: Record<string, unknown>): Pick<MarketPrice, 'price' | 'source'> {
+function currentPrice(row: Record<string, unknown>): {
+  price: number | null
+  source: 'MIDPOINT' | 'LAST' | 'unavailable'
+} {
   const bid = positiveNumber(row.BID)
   const offer = positiveNumber(row.OFFER)
   if (bid !== null && offer !== null && bid <= offer) {

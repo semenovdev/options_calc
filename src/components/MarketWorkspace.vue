@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
 import { BarChart3, Droplets, LineChart as LineChartIcon } from '@lucide/vue'
 
-import { getMarketPrice } from '@/api/iss'
+import { resolveBoardMarketPrice } from '@/api/backendMarketData'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type {
@@ -300,17 +300,6 @@ function liquidityClass(row: OptionBoardRow): string {
   return 'good'
 }
 
-async function updateMarketPrice(
-  strategy: NonNullable<typeof store.activeStrategy>,
-  optionSeries?: OptionSeries,
-): Promise<void> {
-  const quoteSecid = optionSeries?.futures_code || strategy.assetCode
-  strategy.marketPrice = null
-  const quote = await getMarketPrice(quoteSecid)
-  if (quote.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
-  strategy.marketPrice = quote.price
-}
-
 async function loadMarketData(): Promise<void> {
   const strategy = store.activeStrategy
   if (!strategy) return
@@ -331,7 +320,7 @@ async function loadMarketData(): Promise<void> {
     const preferredSeries =
       series.value.find((item) => item.expiration_date === positionExpiration) ?? series.value[0]
     selectedSeriesCode.value = preferredSeries?.optionseries_code ?? ''
-    await updateMarketPrice(strategy, preferredSeries)
+    strategy.marketPrice = null
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки рыночных данных'
   } finally {
@@ -357,8 +346,8 @@ async function loadSeriesData(): Promise<void> {
         strategy.assetType,
       ),
     ])
-    if (boardResult.status === 'fulfilled' && boardResult.value.length) {
-      board.value = boardResult.value
+    if (boardResult.status === 'fulfilled' && boardResult.value.rows.length) {
+      board.value = boardResult.value.rows
     } else {
       board.value = []
       globalThis.console.error(
@@ -385,8 +374,11 @@ async function loadSeriesData(): Promise<void> {
       globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
     }
     if (boardResult.status === 'rejected') throw boardResult.reason
-    if (!boardResult.value.length) throw new Error('Бэкенд вернул пустую доску опционов')
-    await updateMarketPrice(strategy, selectedSeries.value)
+    if (!boardResult.value.rows.length) throw new Error('Бэкенд вернул пустую доску опционов')
+    const quoteSecid = selectedSeries.value?.futures_code || strategy.assetCode
+    const quote = await resolveBoardMarketPrice(boardResult.value, quoteSecid)
+    if (quote.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
+    strategy.marketPrice = quote.price
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
   } finally {

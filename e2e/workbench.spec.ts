@@ -6,12 +6,14 @@ import { MOEX_OPTION_UNDERLYINGS } from './fixtures/moexUnderlyings'
 interface ObservedApi {
   portfolioRequests: Record<string, unknown>[]
   graphRequests: string[]
+  issRequests: string[]
 }
 
 function observeApi(page: Page): ObservedApi {
-  const observed: ObservedApi = { portfolioRequests: [], graphRequests: [] }
+  const observed: ObservedApi = { portfolioRequests: [], graphRequests: [], issRequests: [] }
   page.on('request', (request: Request) => {
     const url = new URL(request.url())
+    if (url.pathname.startsWith('/moex-iss/')) observed.issRequests.push(url.pathname)
     if (request.method() === 'POST' && url.pathname.endsWith('/portfolio/')) {
       observed.portfolioRequests.push(request.postDataJSON() as Record<string, unknown>)
     }
@@ -95,7 +97,8 @@ test('empty strategy → select asset and series → add call and put at theoret
     expect.objectContaining({ secid: live.call.secid, price: live.call.theorprice, quantity: 1 }),
     expect.objectContaining({ secid: live.put.secid, price: live.put.theorprice, quantity: 1 }),
   ])
-  await expect(page.locator('.pnl-value')).not.toHaveText('—')
+  await expect(page.locator('.pnl-value')).not.toHaveText('—', { timeout: 45_000 })
+  if (process.env.E2E_BACKEND === 'rust') expect(observed.issRequests).toEqual([])
 })
 
 test('editing quantity and price recalculates after blur', async ({ page }) => {
@@ -127,6 +130,7 @@ test('reload and switching back to a populated strategy trigger recalculation', 
   await page.reload()
   await expect(page.locator('.positions-table tbody tr')).toHaveCount(2)
   await expect.poll(() => observed.portfolioRequests.length).toBeGreaterThan(beforeReload)
+  await expect(page.getByRole('button', { name: 'Пересчитать' })).toBeEnabled({ timeout: 45_000 })
 
   await page.getByTitle('Новая стратегия').click()
   await expect(page.getByRole('button', { name: 'Добавить инструмент' })).toBeEnabled()

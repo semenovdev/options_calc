@@ -1,7 +1,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
+import { resolveLinearSpecification, resolveUnderlyingMarketPrice } from '@/api/backendMarketData'
 import { optionCalcApi } from '@/api/optionCalc'
 import type { IndicatorGraph, IndicatorType } from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
@@ -209,14 +209,23 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         selectedPositions.find((position) => position.underlyingFutureCode)?.underlyingFutureCode ??
         selectedPositions.find((position) => position.type === 'futures')?.secid ??
         strategy.assetCode
-      const market = await getMarketPrice(quoteSecid)
-      if (market.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
-      const spot = market.price
-      strategy.marketPrice = market.price
-      const linear = await Promise.all(
+      const optionSeriesCode = selectedPositions.find(
+        (position) => position.type === 'option' && position.optionSeriesCode,
+      )?.optionSeriesCode
+      const marketPromise = resolveUnderlyingMarketPrice(
+        strategy.assetCode,
+        strategy.assetType,
+        quoteSecid,
+        optionSeriesCode,
+      )
+      const linearPromise = Promise.all(
         linearPositions.map(async (position) => ({
           position,
-          specification: await getInstrumentSpecification(position.secid, position.type),
+          specification: await resolveLinearSpecification(
+            strategy.assetCode,
+            position.secid,
+            position.type,
+          ),
         })),
       )
       const optionPayload = toPortfolioRequest(strategy, optionPositions)
@@ -228,14 +237,19 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       const optionGraphsPromise = optionPositions.length
         ? loadOptionGraphs(optionPayload)
         : Promise.resolve({} as Partial<Record<IndicatorType, IndicatorGraph>>)
-      const [fullPortfolio, optionPortfolio] = await Promise.all([
+      const [fullPortfolio, optionPortfolio, market, linear] = await Promise.all([
         linearPositions.length
           ? optionCalcApi.calculatePortfolio(currentPortfolioPayload)
           : Promise.resolve(undefined),
         optionPositions.length
           ? optionCalcApi.calculatePortfolio(currentOptionPayload)
           : Promise.resolve(undefined),
+        marketPromise,
+        linearPromise,
       ])
+      if (market.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
+      const spot = market.price
+      strategy.marketPrice = market.price
       const linearPnlNow = linear.reduce(
         (total, item) => total + linearPnl(item, item.specification.price),
         0,

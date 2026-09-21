@@ -24,6 +24,43 @@ describe('optionCalcApi', () => {
     )
   })
 
+  it('normalizes Rust and official MOEX option boards', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            call: [{ secid: 'CALL', strike: 85_000 }],
+            put: [{ secid: 'PUT', strike: 85_000 }],
+            valuation_context: {
+              mode: 'settlement',
+              underlying_price: 85_031,
+              underlying_secid: 'SiZ6',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            call: [{ secid: 'CALL', strike: 85_000 }],
+            put: [{ secid: 'PUT', strike: 85_000 }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const rust = await optionCalcApi.getOptionBoard('SI', 'SERIES', 'futures')
+    const moex = await optionCalcApi.getOptionBoard('SI', 'SERIES', 'futures')
+
+    expect(rust.rows.map((row) => row.option_type)).toEqual(['call', 'put'])
+    expect(rust.valuationContext?.underlying_price).toBe(85_031)
+    expect(moex.rows).toHaveLength(2)
+    expect(moex.valuationContext).toBeNull()
+  })
+
   it('coalesces simultaneous portfolio calculations with the same payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ positions: [], total: {}, initial_margin: 100 }), {

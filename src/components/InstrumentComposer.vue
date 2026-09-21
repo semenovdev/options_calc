@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { Check, LoaderCircle, Search, X } from '@lucide/vue'
 
+import { resolveBoardMarketPrice, resolveFutureMarketPrice } from '@/api/backendMarketData'
 import { getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
@@ -193,17 +194,18 @@ watch(selectedSeriesCode, async (code) => {
   loading.value = true
   error.value = null
   try {
-    board.value = await optionCalcApi.getOptionBoard(
+    const optionBoard = await optionCalcApi.getOptionBoard(
       asset.value.asset_code,
       code,
       asset.value.asset_type,
     )
+    board.value = optionBoard.rows
     if (requestId !== instrumentRequestId || instrumentType.value !== 'option') return
     selectedSecid.value = ''
     const currentSeries = series.value.find((item) => item.optionseries_code === code)
     underlyingPrice.value = null
     const quoteSecid = currentSeries?.futures_code || asset.value.asset_code
-    const quote = await getMarketPrice(quoteSecid)
+    const quote = await resolveBoardMarketPrice(optionBoard, quoteSecid)
     if (quote.price === null) {
       throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
     }
@@ -355,7 +357,9 @@ async function chooseSecid(secid: string): Promise<void> {
   } else {
     const future = futures.value.find((item) => item.futures_code === secid)
     linkedFutureCode.value = secid
-    const quote = await getMarketPrice(future?.futures_code ?? secid)
+    const quote = future
+      ? await resolveFutureMarketPrice(asset.value!.asset_code, future.futures_code)
+      : await getMarketPrice(secid)
     if (quote.price === null) throw new Error(`Нет текущей цены инструмента ${secid}`)
     price.value = quote.price
   }

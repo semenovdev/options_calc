@@ -5,7 +5,7 @@ import type {
   Future,
   IndicatorGraph,
   IndicatorType,
-  OptionBoardRow,
+  OptionBoard,
   OptionBoardResponse,
   OptionSeries,
   PortfolioRequest,
@@ -60,10 +60,15 @@ export const optionCalcApi = {
     return requestJson<OptionBoardResponse>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/optionboard${queryString({ asset_type: assetType })}`,
       { retries: 2 },
-    ).then((board): OptionBoardRow[] => [
-      ...board.call.map((row) => ({ ...row, option_type: 'call' as const })),
-      ...board.put.map((row) => ({ ...row, option_type: 'put' as const })),
-    ])
+    ).then(
+      (board): OptionBoard => ({
+        rows: [
+          ...board.call.map((row) => ({ ...row, option_type: 'call' as const })),
+          ...board.put.map((row) => ({ ...row, option_type: 'put' as const })),
+        ],
+        valuationContext: board.valuation_context ?? null,
+      }),
+    )
   },
 
   getVolatilityGraph(assetCode: string, seriesCode: string, assetType?: AssetType) {

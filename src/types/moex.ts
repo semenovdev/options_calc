@@ -18,6 +18,18 @@ export interface Future {
   expiration_date?: string
   last?: number | null
   settleprice?: number | null
+  bid?: number | null
+  offer?: number | null
+  midpoint?: number | null
+  settlement_price?: number | null
+  price?: number | null
+  price_source?: string | null
+  price_as_of?: string | null
+  currency?: string | null
+  min_step?: number | null
+  step_price?: number | null
+  lot_size?: number | null
+  multiplier?: number | null
 }
 
 export interface OptionSeriesTotals {
@@ -64,6 +76,20 @@ export interface OptionBoardRow {
 export interface OptionBoardResponse {
   call: OptionBoardRow[]
   put: OptionBoardRow[]
+  pricing_mode?: string
+  valuation_context?: ValuationContext | null
+}
+
+export interface ValuationContext {
+  mode?: string | null
+  underlying_price?: number | null
+  underlying_secid?: string | null
+  as_of?: string | null
+}
+
+export interface OptionBoard {
+  rows: OptionBoardRow[]
+  valuationContext: ValuationContext | null
 }
 
 export interface VolatilityPoint {
@@ -141,7 +167,7 @@ export interface MarketPrice {
   secid: string
   price: number | null
   updatedAt?: string | null
-  source: 'MIDPOINT' | 'LAST' | 'unavailable'
+  source: 'MIDPOINT' | 'LAST' | 'SETTLEMENT' | 'unavailable'
 }
 
 export interface InstrumentSpecification extends MarketPrice {
