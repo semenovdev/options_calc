@@ -17,7 +17,6 @@ export function toPortfolioRequest(
       type: position.type,
       quantity: position.quantity,
       price: position.price,
-      volatility: position.volatility,
       netted_im: position.nettedIm,
     })),
     ...(calculationDate
@@ -69,10 +68,5 @@ export function mergePosition(current: Position, incoming: Omit<Position, 'id'>)
       : keepsCurrentDirection
         ? current.price
         : incoming.price,
-    volatility: sameDirection
-      ? weightedValue(current.volatility, current.quantity, incoming.volatility, incoming.quantity)
-      : keepsCurrentDirection
-        ? current.volatility
-        : incoming.volatility,
   }
 }

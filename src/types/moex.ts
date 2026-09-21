@@ -76,7 +76,6 @@ export interface PortfolioPositionRequest {
   type: InstrumentType
   quantity: number
   price?: number
-  volatility?: number
   netted_im?: boolean
 }
 
@@ -91,6 +90,10 @@ export interface PortfolioRequest {
 }
 
 export interface CalculatedPosition extends PortfolioPositionRequest {
+  volatility?: number | null
+  volatility_source?: string | null
+  mark_price?: number | null
+  valuation_source?: string | null
   delta?: number | null
   gamma?: number | null
   vega?: number | null
@@ -138,10 +141,12 @@ export interface MarketPrice {
   secid: string
   price: number | null
   updatedAt?: string | null
-  source: 'LAST' | 'MARKETPRICE' | 'SETTLEPRICE' | 'PREVPRICE' | 'unavailable'
+  source: 'MIDPOINT' | 'LAST' | 'unavailable'
 }
 
 export interface InstrumentSpecification extends MarketPrice {
+  price: number
+  source: 'MIDPOINT' | 'LAST'
   minStep: number
   stepPrice: number
   lotSize: number

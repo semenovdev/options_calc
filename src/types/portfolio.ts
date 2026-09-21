@@ -12,7 +12,6 @@ export interface Position {
   type: InstrumentType
   quantity: number
   price?: number
-  volatility?: number
   nettedIm: boolean
   expirationDate?: string
   optionSeriesCode?: string

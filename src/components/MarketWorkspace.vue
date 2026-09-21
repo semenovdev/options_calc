@@ -21,13 +21,10 @@ import {
   todayMoscow,
 } from '@/utils/format'
 import {
-  interpolateIndicator,
   isLiquidOption,
   niceAxisStep,
   optionSpreadPercent,
-  plausibleUnderlyingPrice,
   profitLossIntervals,
-  sanitizeGreekExpiration,
 } from '@/utils/options'
 
 type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
@@ -57,18 +54,11 @@ const selectedSeries = computed(() =>
 const currentGraph = computed(() => store.calculation.graphs[indicator.value])
 const liquidBoard = computed(() => board.value.filter((option) => isLiquidOption(option)))
 const chartBounds = computed(() => {
-  const prices = currentGraph.value?.now
-    .map((point) => point.underlying_price)
-    .filter((price) => Number.isFinite(price) && price > 0)
   const positionStrikes =
     store.activeStrategy?.positions
       .map((position) => position.strike)
       .filter((strike): strike is number => Boolean(strike)) ?? []
-  const strikeReference = positionStrikes.length
-    ? positionStrikes.reduce((total, strike) => total + strike, 0) / positionStrikes.length
-    : null
-  const reference = strikeReference ?? selectedSeries.value?.central_strike
-  const spot = plausibleUnderlyingPrice(store.activeStrategy?.marketPrice, reference)
+  const spot = store.activeStrategy?.marketPrice
   if (spot && spot > 0) {
     const minimum = Math.max(
       0,
@@ -76,11 +66,6 @@ const chartBounds = computed(() => {
     )
     const maximum = Math.max(spot * 1.25, ...positionStrikes.map((strike) => strike * 1.05))
     return { minimum, maximum, spot, step: niceAxisStep(maximum - minimum) }
-  }
-  if (prices?.length) {
-    const minimum = Math.min(...prices)
-    const maximum = Math.max(...prices)
-    return { minimum, maximum, spot: null, step: niceAxisStep(maximum - minimum) }
   }
   return { minimum: 0, maximum: 100, spot: null, step: 20 }
 })
@@ -117,23 +102,12 @@ const profileOption = computed<EChartsOption>(() => {
   const graph = currentGraph.value
   const bounds = chartBounds.value
   const chartData = (points: IndicatorPoint[]) =>
-    interpolateIndicator(points ?? [], bounds.minimum, bounds.maximum).map((point) => [
-      point.underlying_price,
-      point.value,
-    ])
-  const nowPoints = interpolateIndicator(graph?.now ?? [], bounds.minimum, bounds.maximum)
-  const expirationSource =
-    indicator.value === 'profit_and_loss'
-      ? (graph?.on_expiration ?? [])
-      : sanitizeGreekExpiration(graph?.now ?? [], graph?.on_expiration ?? [])
-  const expirationPoints = interpolateIndicator(expirationSource, bounds.minimum, bounds.maximum)
-  const scenarioPoints = interpolateIndicator(
-    graph?.on_what_if ?? [],
-    bounds.minimum,
-    bounds.maximum,
-  )
-  const payoffPoints = expirationPoints.length ? expirationPoints : nowPoints
-  const payoffZones = profitLossIntervals(payoffPoints)
+    points.map((point) => [point.underlying_price, point.value])
+  const nowPoints = graph?.now ?? []
+  const expirationSource = graph?.on_expiration ?? []
+  const expirationPoints = expirationSource
+  const scenarioPoints = graph?.on_what_if ?? []
+  const payoffZones = profitLossIntervals(expirationPoints)
   const graphValues = [...nowPoints, ...expirationPoints, ...scenarioPoints].map(
     (point) => point.value,
   )
@@ -324,12 +298,10 @@ async function updateMarketPrice(
   optionSeries?: OptionSeries,
 ): Promise<void> {
   const quoteSecid = optionSeries?.futures_code || strategy.assetCode
-  try {
-    const quote = (await getMarketPrice(quoteSecid)).price
-    strategy.marketPrice = plausibleUnderlyingPrice(quote, optionSeries?.central_strike)
-  } catch {
-    strategy.marketPrice = optionSeries?.central_strike ?? null
-  }
+  strategy.marketPrice = null
+  const quote = await getMarketPrice(quoteSecid)
+  if (quote.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
+  strategy.marketPrice = quote.price
 }
 
 async function loadMarketData(): Promise<void> {
@@ -378,11 +350,35 @@ async function loadSeriesData(): Promise<void> {
         strategy.assetType,
       ),
     ])
-    if (boardResult.status === 'fulfilled') board.value = boardResult.value
-    if (smileResult.status === 'fulfilled') smile.value = smileResult.value
-    if (boardResult.status === 'rejected' && smileResult.status === 'rejected') {
-      throw boardResult.reason
+    if (boardResult.status === 'fulfilled' && boardResult.value.length) {
+      board.value = boardResult.value
+    } else {
+      board.value = []
+      globalThis.console.error(
+        '[MOEX Options] Option board error:',
+        boardResult.status === 'rejected' ? boardResult.reason : 'backend returned an empty board',
+      )
     }
+    const invalidSmileIndex =
+      smileResult.status === 'fulfilled'
+        ? smileResult.value.findIndex(
+            (point) => !Number.isFinite(point.strike) || !Number.isFinite(point.volatility),
+          )
+        : -1
+    if (smileResult.status === 'fulfilled' && smileResult.value.length && invalidSmileIndex < 0) {
+      smile.value = smileResult.value
+    } else {
+      smile.value = []
+      const reason =
+        smileResult.status === 'rejected'
+          ? smileResult.reason
+          : !smileResult.value.length
+            ? 'backend returned an empty graph'
+            : `backend returned an invalid point at index ${invalidSmileIndex}`
+      globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
+    }
+    if (boardResult.status === 'rejected') throw boardResult.reason
+    if (!boardResult.value.length) throw new Error('Бэкенд вернул пустую доску опционов')
     await updateMarketPrice(strategy, selectedSeries.value)
   } catch (reason) {
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
@@ -427,7 +423,7 @@ watch(selectedSeriesCode, loadSeriesData)
       </select>
     </div>
 
-    <div v-if="marketError && activeTab !== 'profile'" class="inline-error">{{ marketError }}</div>
+    <div v-if="marketError" class="inline-error">{{ marketError }}</div>
 
     <template v-if="activeTab === 'profile'">
       <div class="indicator-switcher">
@@ -444,7 +440,11 @@ watch(selectedSeriesCode, loadSeriesData)
           Базовый <strong>{{ formatNumber(chartBounds.spot) }}</strong>
         </span>
       </div>
-      <div v-if="currentGraph?.now.length" class="chart-frame" data-testid="profile-chart">
+      <div
+        v-if="store.activeStrategy?.marketPrice != null && currentGraph?.now.length"
+        class="chart-frame"
+        data-testid="profile-chart"
+      >
         <VChart :option="profileOption" autoresize @legendselectchanged="handleLegendSelection" />
       </div>
       <div v-else class="chart-empty">

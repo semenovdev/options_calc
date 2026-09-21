@@ -19,11 +19,9 @@ export function hasTheoreticalPrice(option: OptionBoardRow): boolean {
   )
 }
 
-export function optionMarketPrice(option: OptionBoardRow): number | null {
-  if (option.last && option.last > 0) return option.last
-  if (option.bid && option.offer && option.bid > 0 && option.offer > 0) {
-    return (option.bid + option.offer) / 2
-  }
+export function optionMarketPrice(option: OptionBoardRow, quantity = 1): number | null {
+  if (quantity > 0 && option.offer && option.offer > 0) return option.offer
+  if (quantity < 0 && option.bid && option.bid > 0) return option.bid
   return null
 }
 
@@ -66,28 +64,6 @@ export function spotDividerPosition(
   if (!options.length || !underlyingPrice) return -1
   const firstBelowSpot = options.findIndex((option) => option.strike <= underlyingPrice)
   return firstBelowSpot === -1 ? options.length : firstBelowSpot
-}
-
-export function plausibleUnderlyingPrice(
-  candidate: number | null | undefined,
-  reference: number | null | undefined,
-): number | null {
-  if (!candidate || !Number.isFinite(candidate) || candidate <= 0) return reference ?? null
-  if (!reference || !Number.isFinite(reference) || reference <= 0) return candidate
-  const ratio = candidate / reference
-  return ratio >= 0.5 && ratio <= 2 ? candidate : reference
-}
-
-export function sanitizeGreekExpiration(
-  current: IndicatorPoint[],
-  expiration: IndicatorPoint[],
-): IndicatorPoint[] {
-  const currentMaximum = Math.max(0, ...current.map((point) => Math.abs(point.value)))
-  const limit = Math.max(1, currentMaximum * 1000)
-  return expiration.map((point) => ({
-    ...point,
-    value: Number.isFinite(point.value) && Math.abs(point.value) <= limit ? point.value : 0,
-  }))
 }
 
 export function niceAxisStep(range: number, targetSplits = 6): number {

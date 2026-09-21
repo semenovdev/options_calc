@@ -27,6 +27,10 @@ function typeLabel(type: string): string {
   )
 }
 
+function positionVolatility(secid: string): number | null | undefined {
+  return calculatedBySecid.value.get(secid)?.volatility
+}
+
 function focusPosition(id: string): void {
   store.focusedPositionId = store.focusedPositionId === id ? null : id
   void store.calculate()
@@ -106,7 +110,11 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
               {{ formatNumber(calculatedBySecid.get(position.secid)?.theorprice) }}
             </td>
             <td class="numeric">
-              {{ position.volatility ? `${formatNumber(position.volatility)}%` : '—' }}
+              {{
+                positionVolatility(position.secid) != null
+                  ? `${formatNumber(positionVolatility(position.secid))}%`
+                  : '—'
+              }}
             </td>
             <td class="action-cell">
               <button

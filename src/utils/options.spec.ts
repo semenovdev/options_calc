@@ -9,9 +9,7 @@ import {
   optionMarketPrice,
   optionsAroundPrice,
   optionsBySpot,
-  plausibleUnderlyingPrice,
   profitLossIntervals,
-  sanitizeGreekExpiration,
   spotDividerPosition,
   splitProfitLossArea,
 } from './options'
@@ -23,9 +21,12 @@ describe('option helpers', () => {
     expect(isLiquidOption({ secid: 'NO-OFFER', strike: 100, bid: 5, offer: 0 })).toBe(false)
   })
 
-  it('does not substitute a theoretical price for a missing market price', () => {
+  it('uses the offer for a purchase and the bid for a sale', () => {
     expect(optionMarketPrice({ secid: 'THEORETICAL', strike: 100, theorprice: 12 })).toBeNull()
-    expect(optionMarketPrice({ secid: 'QUOTED', strike: 100, bid: 10, offer: 12 })).toBe(11)
+    expect(optionMarketPrice({ secid: 'QUOTED', strike: 100, bid: 10, offer: 12 }, 1)).toBe(12)
+    expect(optionMarketPrice({ secid: 'QUOTED', strike: 100, bid: 10, offer: 12 }, -1)).toBe(10)
+    expect(optionMarketPrice({ secid: 'NO-OFFER', strike: 100, bid: 10 }, 1)).toBeNull()
+    expect(optionMarketPrice({ secid: 'NO-BID', strike: 100, offer: 12 }, -1)).toBeNull()
   })
 
   it('keeps zero-valued theoretical prices at expiration', () => {
@@ -57,26 +58,6 @@ describe('option helpers', () => {
     expect(spotDividerPosition(options, 120)).toBe(0)
     expect(spotDividerPosition(options, 105)).toBe(1)
     expect(spotDividerPosition(options, 80)).toBe(3)
-  })
-
-  it('rejects an underlying quote in incompatible units', () => {
-    expect(plausibleUnderlyingPrice(280, 86_000)).toBe(86_000)
-    expect(plausibleUnderlyingPrice(85_952, 86_000)).toBe(85_952)
-  })
-
-  it('removes singular expiration values without dropping the greek curve', () => {
-    expect(
-      sanitizeGreekExpiration(
-        [{ underlying_price: 85_000, value: -206 }],
-        [
-          { underlying_price: 82_500, value: -482_927_707_288 },
-          { underlying_price: 85_000, value: 0 },
-        ],
-      ),
-    ).toEqual([
-      { underlying_price: 82_500, value: 0 },
-      { underlying_price: 85_000, value: 0 },
-    ])
   })
 
   it('uses readable dynamic axis steps', () => {

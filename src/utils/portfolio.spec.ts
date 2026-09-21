@@ -18,7 +18,6 @@ const strategy: Strategy = {
       type: 'option',
       quantity: -2,
       price: 12.5,
-      volatility: 28,
       nettedIm: true,
     },
   ],
@@ -35,7 +34,6 @@ describe('toPortfolioRequest', () => {
           type: 'option',
           quantity: -2,
           price: 12.5,
-          volatility: 28,
           netted_im: true,
         },
       ],
@@ -58,7 +56,7 @@ describe('toPortfolioRequest', () => {
     expect(payload).not.toHaveProperty('what_if')
   })
 
-  it('adds the current date when volatility shift is set without a date', () => {
+  it('uses the current date when only a scenario volatility shift is set', () => {
     const payload = toPortfolioRequest({
       ...strategy,
       calculationDate: '',
@@ -79,12 +77,10 @@ describe('mergePosition', () => {
       type: 'option',
       quantity: -1,
       price: 20,
-      volatility: 34,
       nettedIm: true,
     })
     expect(merged?.quantity).toBe(-3)
     expect(merged?.price).toBe(15)
-    expect(merged?.volatility).toBe(30)
   })
 
   it('keeps the original entry price when partially closing', () => {

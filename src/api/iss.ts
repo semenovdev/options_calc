@@ -25,18 +25,31 @@ function finiteNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null
 }
 
+function positiveNumber(value: unknown): number | null {
+  const number = finiteNumber(value)
+  return number !== null && number > 0 ? number : null
+}
+
+function currentPrice(row: Record<string, unknown>): Pick<MarketPrice, 'price' | 'source'> {
+  const bid = positiveNumber(row.BID)
+  const offer = positiveNumber(row.OFFER)
+  if (bid !== null && offer !== null && bid <= offer) {
+    return { price: (bid + offer) / 2, source: 'MIDPOINT' }
+  }
+  const last = positiveNumber(row.LAST)
+  return last === null ? { price: null, source: 'unavailable' } : { price: last, source: 'LAST' }
+}
+
 function hasPrice(row: Record<string, unknown>): boolean {
-  return ['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'].some(
-    (field) => finiteNumber(row[field]) !== null,
-  )
+  return currentPrice(row).price !== null
 }
 
 function bestPriceRow(items: Record<string, unknown>[]): Record<string, unknown> | undefined {
-  return items.find((row) => finiteNumber(row.LAST) !== null) ?? items.find(hasPrice)
+  return items.find(hasPrice)
 }
 
 export async function getMarketPrice(secid: string): Promise<MarketPrice> {
-  const columns = 'SECID,LAST,MARKETPRICE,SETTLEPRICE,PREVPRICE,UPDATETIME'
+  const columns = 'SECID,BID,OFFER,LAST,UPDATETIME'
   const response = await requestJson<IssSecurityResponse>(
     `/moex-iss/securities/${encodeURIComponent(secid)}.json${queryString({
       'iss.meta': 'off',
@@ -70,13 +83,12 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
     )
     row = bestPriceRow(rows(sharesResponse.marketdata)) ?? row
   }
-  const candidates = ['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'] as const
-  const source = candidates.find((field) => finiteNumber(row[field]) !== null)
+  const market = currentPrice(row)
   return {
     secid,
-    price: source ? finiteNumber(row[source]) : null,
+    price: market.price,
     updatedAt: typeof row.UPDATETIME === 'string' ? row.UPDATETIME : null,
-    source: source ?? 'unavailable',
+    source: market.source,
   }
 }
 
@@ -85,7 +97,7 @@ export async function getInstrumentSpecification(
   type: Extract<InstrumentType, 'futures' | 'share'>,
 ): Promise<InstrumentSpecification> {
   const market = type === 'futures' ? 'futures/markets/forts' : 'stock/markets/shares'
-  const columns = 'SECID,LAST,MARKETPRICE,SETTLEPRICE,PREVPRICE,UPDATETIME'
+  const columns = 'SECID,BID,OFFER,LAST,UPDATETIME'
   const response = await requestJson<IssSecurityResponse>(
     `/moex-iss/engines/${market}/securities/${encodeURIComponent(secid)}.json${queryString({
       'iss.meta': 'off',
@@ -95,18 +107,26 @@ export async function getInstrumentSpecification(
     })}`,
     { retries: 2 },
   )
-  const marketRow = bestPriceRow(rows(response.marketdata)) ?? {}
-  const securityRow = rows(response.securities)[0] ?? {}
-  const source = (['LAST', 'MARKETPRICE', 'SETTLEPRICE', 'PREVPRICE'] as const).find(
-    (field) => finiteNumber(marketRow[field]) !== null,
-  )
+  const marketRow = bestPriceRow(rows(response.marketdata))
+  const securityRow = rows(response.securities)[0]
+  if (!marketRow || !securityRow) throw new Error(`Нет данных по инструменту ${secid}`)
+  const marketPrice = currentPrice(marketRow)
+  const minStep = finiteNumber(securityRow.MINSTEP)
+  const stepPrice = finiteNumber(securityRow.STEPPRICE)
+  const lotSize = finiteNumber(securityRow.LOTSIZE)
+  if (marketPrice.price === null || marketPrice.source === 'unavailable') {
+    throw new Error(`Нет текущей цены инструмента ${secid}`)
+  }
+  if (minStep === null || stepPrice === null || lotSize === null) {
+    throw new Error(`MOEX не прислал спецификацию инструмента ${secid}`)
+  }
   return {
     secid,
-    price: source ? finiteNumber(marketRow[source]) : null,
+    price: marketPrice.price,
     updatedAt: typeof marketRow.UPDATETIME === 'string' ? marketRow.UPDATETIME : null,
-    source: source ?? 'unavailable',
-    minStep: finiteNumber(securityRow.MINSTEP) ?? 1,
-    stepPrice: finiteNumber(securityRow.STEPPRICE) ?? 1,
-    lotSize: finiteNumber(securityRow.LOTSIZE) ?? 1,
+    source: marketPrice.source,
+    minStep,
+    stepPrice,
+    lotSize,
   }
 }

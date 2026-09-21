@@ -1,49 +1,85 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getMarketPrice } from './iss'
+import { getInstrumentSpecification, getMarketPrice } from './iss'
 
 afterEach(() => vi.unstubAllGlobals())
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })
+function issResponse(
+  marketdata: Record<string, unknown>[],
+  securities: Record<string, unknown>[] = [],
+): Response {
+  const block = (rows: Record<string, unknown>[]) => {
+    const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
+    return { columns, data: rows.map((row) => columns.map((column) => row[column] ?? null)) }
+  }
+  return new Response(
+    JSON.stringify({ marketdata: block(marketdata), securities: block(securities) }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  )
 }
 
-describe('getMarketPrice', () => {
-  it('falls back to FORTS marketdata for futures', async () => {
+describe('MOEX ISS prices', () => {
+  it('uses the midpoint when both sides of the order book are available', async () => {
     vi.stubGlobal(
       'fetch',
       vi
         .fn()
-        .mockResolvedValueOnce(jsonResponse({}))
-        .mockResolvedValueOnce(
-          jsonResponse({ marketdata: { columns: ['SECID', 'LAST'], data: [['GZU6', 9377]] } }),
+        .mockResolvedValue(
+          issResponse([{ SECID: 'SiZ6', BID: 85_026, OFFER: 85_028, LAST: 85_020 }]),
         ),
     )
-    await expect(getMarketPrice('GZU6')).resolves.toMatchObject({ price: 9377, source: 'LAST' })
+
+    await expect(getMarketPrice('SiZ6')).resolves.toMatchObject({
+      price: 85_027,
+      source: 'MIDPOINT',
+    })
   })
 
-  it('prefers a board with the latest trade for shares', async () => {
+  it('uses LAST only when a complete order-book midpoint is unavailable', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(issResponse([{ SECID: 'SiZ6', BID: 85_026, LAST: 85_020 }])),
+    )
+
+    await expect(getMarketPrice('SiZ6')).resolves.toMatchObject({
+      price: 85_020,
+      source: 'LAST',
+    })
+  })
+
+  it('reports an unavailable price instead of using settlement or previous values', async () => {
     vi.stubGlobal(
       'fetch',
       vi
         .fn()
-        .mockResolvedValueOnce(jsonResponse({}))
-        .mockResolvedValueOnce(jsonResponse({}))
-        .mockResolvedValueOnce(
-          jsonResponse({
-            marketdata: {
-              columns: ['SECID', 'LAST', 'MARKETPRICE'],
-              data: [
-                ['SBER', null, 285.84],
-                ['SBER', 279.94, 285.84],
-              ],
-            },
-          }),
+        .mockImplementation(() =>
+          Promise.resolve(
+            issResponse([{ SECID: 'SiZ6', BID: 85_026, SETTLEPRICE: 85_010, PREVPRICE: 84_900 }]),
+          ),
         ),
     )
-    await expect(getMarketPrice('SBER')).resolves.toMatchObject({ price: 279.94, source: 'LAST' })
+
+    await expect(getMarketPrice('SiZ6')).resolves.toMatchObject({
+      price: null,
+      source: 'unavailable',
+    })
+  })
+
+  it('rejects an incomplete instrument specification', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          issResponse(
+            [{ SECID: 'SiZ6', BID: 85_026, OFFER: 85_028 }],
+            [{ SECID: 'SiZ6', MINSTEP: null, STEPPRICE: 1, LOTSIZE: 1 }],
+          ),
+        ),
+    )
+
+    await expect(getInstrumentSpecification('SiZ6', 'futures')).rejects.toThrow(
+      'MOEX не прислал спецификацию инструмента SiZ6',
+    )
   })
 })

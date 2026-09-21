@@ -13,8 +13,10 @@ export function linearMultiplier(item: LinearPosition): number {
 }
 
 export function linearPnl(item: LinearPosition, marketPrice: number): number {
-  const entryPrice = item.position.price ?? item.specification.price ?? marketPrice
-  return (marketPrice - entryPrice) * item.position.quantity * linearMultiplier(item)
+  if (item.position.price === undefined) {
+    throw new Error(`Не указана цена входа для ${item.position.secid}`)
+  }
+  return (marketPrice - item.position.price) * item.position.quantity * linearMultiplier(item)
 }
 
 function grid(spot: number): IndicatorPoint[] {

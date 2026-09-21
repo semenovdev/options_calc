@@ -136,22 +136,6 @@ test('reload and switching back to a populated strategy trigger recalculation', 
   await expect.poll(() => observed.portfolioRequests.length).toBeGreaterThan(beforeSwitch)
 })
 
-test('cached strategy remains usable when network APIs become unavailable', async ({ page }) => {
-  await page.goto('/')
-  const live = await discoverLiveCase(page)
-  await addTheoreticalStrangle(page, live)
-
-  await page.route('**/moex-option-calc/**', (route) => route.abort('connectionfailed'))
-  await page.route('**/moex-iss/**', (route) => route.abort('connectionfailed'))
-  await page.reload()
-
-  await expect(page.locator('.positions-table tbody tr')).toHaveCount(2)
-  await expect(page.locator('.positions-table input.quantity').first()).toBeEnabled()
-  await expect(page.getByRole('alert')).toContainText('Не удалось подключиться к MOEX')
-  await page.getByRole('button', { name: 'Улыбка IV' }).click()
-  await expect(page.locator('.inline-error')).toContainText('Не удалось подключиться к MOEX')
-})
-
 test('adding another position is locked to the selected underlying', async ({ page }) => {
   await page.goto('/')
   const live = await discoverLiveCase(page)

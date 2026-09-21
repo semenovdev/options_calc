@@ -7,8 +7,10 @@ import { formatMoney, signed } from '@/utils/format'
 
 const store = usePortfolioStore()
 const totals = computed(() => store.calculation.portfolio?.total)
-const deltaHedge = computed(() => Math.round(-(totals.value?.delta ?? 0)))
-const vegaHedge = computed(() => -(totals.value?.vega ?? 0))
+const deltaHedge = computed(() =>
+  totals.value?.delta == null ? null : Math.round(-totals.value.delta),
+)
+const vegaHedge = computed(() => (totals.value?.vega == null ? null : -totals.value.vega))
 
 function addDeltaHedge(): void {
   const strategy = store.activeStrategy
@@ -32,8 +34,8 @@ function addDeltaHedge(): void {
       <strong
         class="pnl-value"
         :class="{
-          positive: (totals?.profit_and_loss_rub ?? 0) > 0,
-          negative: (totals?.profit_and_loss_rub ?? 0) < 0,
+          positive: totals?.profit_and_loss_rub != null && totals.profit_and_loss_rub > 0,
+          negative: totals?.profit_and_loss_rub != null && totals.profit_and_loss_rub < 0,
         }"
       >
         {{ formatMoney(totals?.profit_and_loss_rub) }}

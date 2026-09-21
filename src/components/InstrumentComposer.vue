@@ -45,7 +45,6 @@ const underlyingPrice = ref<number | null>(null)
 const optionListRef = ref<globalThis.HTMLElement | null>(null)
 const quantity = ref(1)
 const price = ref<number | undefined>()
-const volatility = ref<number | undefined>()
 const instrumentFilter = ref('')
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -62,7 +61,9 @@ function eligibleOptions(side: 'call' | 'put', mode: 'market' | 'theoretical') {
   const options = board.value.filter(
     (item) =>
       item.option_type === side &&
-      (mode === 'market' ? isLiquidOption(item) : hasTheoreticalPrice(item)),
+      (mode === 'market'
+        ? optionMarketPrice(item, quantity.value) !== null
+        : hasTheoreticalPrice(item)),
   )
   return Array.from(new Map(options.map((item) => [item.secid, item])).values())
 }
@@ -111,7 +112,15 @@ const lockedFutureCode = computed(
     selectedSeries.value?.futures_code ??
     undefined,
 )
-const canAdd = computed(() => Boolean(asset.value && selectedSecid.value && quantity.value))
+const canAdd = computed(() =>
+  Boolean(
+    asset.value &&
+    selectedSecid.value &&
+    quantity.value &&
+    price.value !== undefined &&
+    Number.isFinite(price.value),
+  ),
+)
 const atmStrike = computed(() => {
   if (!filteredBoard.value.length || !underlyingPrice.value) return null
   return filteredBoard.value.reduce((closest, item) =>
@@ -192,15 +201,17 @@ watch(selectedSeriesCode, async (code) => {
     if (requestId !== instrumentRequestId || instrumentType.value !== 'option') return
     selectedSecid.value = ''
     const currentSeries = series.value.find((item) => item.optionseries_code === code)
-    underlyingPrice.value = currentSeries?.central_strike ?? null
+    underlyingPrice.value = null
     const quoteSecid = currentSeries?.futures_code || asset.value.asset_code
-    try {
-      underlyingPrice.value = (await getMarketPrice(quoteSecid)).price ?? underlyingPrice.value
-    } catch {
-      // The central strike remains a useful ATM fallback when ISS has no quote.
+    const quote = await getMarketPrice(quoteSecid)
+    if (quote.price === null) {
+      throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
     }
+    underlyingPrice.value = quote.price
     await scrollToAtm()
   } catch (reason) {
+    board.value = []
+    underlyingPrice.value = null
     error.value = reason instanceof Error ? reason.message : 'Не удалось загрузить доску опционов'
   } finally {
     loading.value = false
@@ -217,8 +228,13 @@ watch(strikeRange, () => void scrollToAtm())
 watch([optionSide, optionPriceMode], () => {
   selectedSecid.value = ''
   price.value = undefined
-  volatility.value = undefined
   void scrollToAtm()
+})
+
+watch(quantity, () => {
+  if (instrumentType.value !== 'option' || optionPriceMode.value !== 'market') return
+  const option = selectedOption.value
+  price.value = option ? (optionMarketPrice(option, quantity.value) ?? undefined) : undefined
 })
 
 watch(open, async (isOpen) => {
@@ -253,7 +269,6 @@ function reset(): void {
   underlyingPrice.value = null
   quantity.value = 1
   price.value = undefined
-  volatility.value = undefined
   error.value = null
   pendingPositions.value = []
 }
@@ -294,7 +309,6 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
   error.value = null
   selectedSecid.value = ''
   price.value = undefined
-  volatility.value = undefined
   try {
     if (type === 'option') {
       const result = await optionCalcApi.getSeries(asset.value.asset_code, asset.value.asset_type)
@@ -338,15 +352,12 @@ async function chooseSecid(secid: string): Promise<void> {
   if (instrumentType.value === 'option') {
     const option = board.value.find((item) => item.secid === secid)
     price.value = option ? (selectedOptionPrice(option) ?? undefined) : undefined
-    volatility.value = option?.volatility ?? undefined
   } else {
     const future = futures.value.find((item) => item.futures_code === secid)
     linkedFutureCode.value = secid
-    price.value = future?.last ?? future?.settleprice ?? undefined
-    if (price.value === undefined) {
-      const quote = await getMarketPrice(secid)
-      price.value = quote.price ?? undefined
-    }
+    const quote = await getMarketPrice(future?.futures_code ?? secid)
+    if (quote.price === null) throw new Error(`Нет текущей цены инструмента ${secid}`)
+    price.value = quote.price
   }
 }
 
@@ -363,7 +374,7 @@ function futuresSearchAliases(value: string): string[] {
 
 function selectedOptionPrice(option: OptionBoardRow): number | null {
   return optionPriceMode.value === 'market'
-    ? optionMarketPrice(option)
+    ? optionMarketPrice(option, quantity.value)
     : (option.theorprice ?? null)
 }
 
@@ -407,7 +418,6 @@ function add(): void {
     type: instrumentType.value,
     quantity: quantity.value,
     price: price.value,
-    volatility: volatility.value,
     nettedIm: true,
     expirationDate,
     optionSeriesCode: option ? selectedSeries.value?.optionseries_code : undefined,
@@ -420,7 +430,6 @@ function add(): void {
   })
   selectedSecid.value = instrumentType.value === 'share' ? asset.value.asset_code : ''
   price.value = undefined
-  volatility.value = undefined
 }
 
 function finish(): void {
@@ -605,7 +614,7 @@ function finish(): void {
                     <span class="quote" :class="{ comparison: optionPriceMode === 'market' }">
                       <span v-if="optionPriceMode === 'market'" class="quote-value">
                         <small>Рынок</small>
-                        <strong>{{ formatNumber(optionMarketPrice(item)) }}</strong>
+                        <strong>{{ formatNumber(optionMarketPrice(item, quantity)) }}</strong>
                       </span>
                       <span class="quote-value">
                         <small>Расчёт</small>
@@ -678,13 +687,6 @@ function finish(): void {
                       ? 'Расчётная'
                       : 'Рыночная'
                   "
-              /></label>
-              <label class="field-label"
-                >Волатильность, %<input
-                  v-model.number="volatility"
-                  type="number"
-                  step="0.1"
-                  :disabled="instrumentType !== 'option'"
               /></label>
             </div>
           </div>

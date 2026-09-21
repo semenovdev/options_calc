@@ -41,7 +41,6 @@ describe('optionCalcApi', () => {
           type: 'option',
           quantity: 1,
           price: 2850,
-          volatility: 34.76,
           netted_im: true,
         },
       ],
