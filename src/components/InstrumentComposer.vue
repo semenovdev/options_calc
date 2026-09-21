@@ -190,33 +190,47 @@ watch(query, (value) => {
 
 watch(selectedSeriesCode, async (code) => {
   if (!asset.value || !code || instrumentType.value !== 'option') return
-  const requestId = instrumentRequestId
+  const selectedAsset = asset.value
+  const requestId = ++instrumentRequestId
   loading.value = true
   error.value = null
   try {
     const optionBoard = await optionCalcApi.getOptionBoard(
-      asset.value.asset_code,
+      selectedAsset.asset_code,
       code,
-      asset.value.asset_type,
+      selectedAsset.asset_type,
     )
+    if (
+      requestId !== instrumentRequestId ||
+      instrumentType.value !== 'option' ||
+      asset.value !== selectedAsset ||
+      selectedSeriesCode.value !== code
+    )
+      return
     board.value = optionBoard.rows
-    if (requestId !== instrumentRequestId || instrumentType.value !== 'option') return
     selectedSecid.value = ''
     const currentSeries = series.value.find((item) => item.optionseries_code === code)
     underlyingPrice.value = null
-    const quoteSecid = currentSeries?.futures_code || asset.value.asset_code
+    const quoteSecid = currentSeries?.futures_code || selectedAsset.asset_code
     const quote = await resolveBoardMarketPrice(optionBoard, quoteSecid)
+    if (
+      requestId !== instrumentRequestId ||
+      asset.value !== selectedAsset ||
+      selectedSeriesCode.value !== code
+    )
+      return
     if (quote.price === null) {
       throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
     }
     underlyingPrice.value = quote.price
     await scrollToAtm()
   } catch (reason) {
+    if (requestId !== instrumentRequestId) return
     board.value = []
     underlyingPrice.value = null
     error.value = reason instanceof Error ? reason.message : 'Не удалось загрузить доску опционов'
   } finally {
-    loading.value = false
+    if (requestId === instrumentRequestId) loading.value = false
   }
 })
 
@@ -281,11 +295,25 @@ function close(): void {
 }
 
 async function chooseAsset(value: Asset): Promise<void> {
+  clearInstrumentSelection()
   asset.value = value
-  linkedFutureCode.value = ''
   step.value = 'instrument'
   instrumentType.value = 'option'
   await loadInstruments(instrumentType.value)
+}
+
+function clearInstrumentSelection(): void {
+  instrumentRequestId += 1
+  series.value = []
+  selectedSeriesCode.value = ''
+  board.value = []
+  futures.value = []
+  selectedSecid.value = ''
+  linkedFutureCode.value = ''
+  underlyingPrice.value = null
+  price.value = undefined
+  instrumentFilter.value = ''
+  error.value = null
 }
 
 async function chooseSearchFuture(result: { asset: Asset; future: Future }): Promise<void> {
