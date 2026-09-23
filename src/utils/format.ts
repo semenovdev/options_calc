@@ -39,7 +39,8 @@ export function formatPercent(value?: number | null): string {
 
 export function signed(value?: number | null): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—'
-  return `${value > 0 ? '+' : ''}${numberFormatter.format(value)}`
+  const formatted = numberFormatter.format(value)
+  return value > 0 && formatted === '0' ? '+0' : formatted
 }
 
 export function todayMoscow(): string {
