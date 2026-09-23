@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
-import { BarChart3, Droplets, LineChart as LineChartIcon } from '@lucide/vue'
+import { BarChart3, Droplets, LineChart as LineChartIcon, LoaderCircle } from '@lucide/vue'
 
-import { resolveBoardMarketPrice } from '@/api/backendMarketData'
+import { isAbortError } from '@/api/http'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type {
@@ -30,7 +30,12 @@ import {
 type WorkspaceTab = 'profile' | 'smile' | 'liquidity'
 const store = usePortfolioStore()
 const activeTab = ref<WorkspaceTab>('profile')
-const indicator = ref<IndicatorType>('profit_and_loss')
+const indicator = computed({
+  get: () => store.selectedIndicator,
+  set: (value: IndicatorType) => {
+    store.selectedIndicator = value
+  },
+})
 const scenarioVisible = ref(false)
 const series = ref<OptionSeries[]>([])
 const selectedSeriesCode = ref('')
@@ -38,6 +43,9 @@ const board = ref<OptionBoardRow[]>([])
 const smile = ref<VolatilityPoint[]>([])
 const loadingMarket = ref(false)
 const marketError = ref<string | null>(null)
+let seriesController: globalThis.AbortController | undefined
+let dataController: globalThis.AbortController | undefined
+let seriesLoaded = false
 
 const indicatorLabels: Record<IndicatorType, string> = {
   profit_and_loss: 'P&L',
@@ -302,87 +310,97 @@ function liquidityClass(row: OptionBoardRow): string {
 
 async function loadMarketData(): Promise<void> {
   const strategy = store.activeStrategy
-  if (!strategy) return
+  if (!strategy || activeTab.value === 'profile') return
+  seriesController?.abort()
+  const controller = new globalThis.AbortController()
+  seriesController = controller
   loadingMarket.value = true
   marketError.value = null
-  series.value = []
-  selectedSeriesCode.value = ''
-  board.value = []
-  smile.value = []
   try {
-    series.value = (await optionCalcApi.getSeries(strategy.assetCode, strategy.assetType)).filter(
-      (item) => item.expiration_date >= todayMoscow(),
-    )
+    const result = await optionCalcApi.getSeries(strategy.assetCode, strategy.assetType, {
+      signal: controller.signal,
+    })
+    if (controller.signal.aborted || seriesController !== controller) return
+    series.value = result.filter((item) => item.expiration_date >= todayMoscow())
     series.value.sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
-    const positionExpiration = strategy.positions.find(
+    const position = strategy.positions.find(
       (position) => position.type === 'option' && position.expirationDate,
-    )?.expirationDate
+    )
     const preferredSeries =
-      series.value.find((item) => item.expiration_date === positionExpiration) ?? series.value[0]
+      series.value.find((item) => item.optionseries_code === position?.optionSeriesCode) ??
+      series.value.find(
+        (item) =>
+          item.expiration_date === position?.expirationDate &&
+          (!position.underlyingFutureCode || item.futures_code === position.underlyingFutureCode),
+      ) ??
+      series.value[0]
+    seriesLoaded = true
     selectedSeriesCode.value = preferredSeries?.optionseries_code ?? ''
-    strategy.marketPrice = null
   } catch (reason) {
+    if (controller.signal.aborted || seriesController !== controller || isAbortError(reason)) return
     marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки рыночных данных'
   } finally {
-    loadingMarket.value = false
+    if (seriesController === controller && !controller.signal.aborted) {
+      seriesController = undefined
+      loadingMarket.value = false
+    }
   }
 }
 
 async function loadSeriesData(): Promise<void> {
   const strategy = store.activeStrategy
-  if (!strategy || !selectedSeriesCode.value) return
+  dataController?.abort()
+  dataController = undefined
+  const tab = activeTab.value
+  const seriesCode = selectedSeriesCode.value
+  if (!strategy || !seriesCode || tab === 'profile') return
+  const controller = new globalThis.AbortController()
+  dataController = controller
   loadingMarket.value = true
   marketError.value = null
+  board.value = []
+  smile.value = []
   try {
-    const [boardResult, smileResult] = await Promise.allSettled([
-      optionCalcApi.getOptionBoard(
+    const options = { signal: controller.signal }
+    if (tab === 'smile') {
+      const result = await optionCalcApi.getVolatilityGraph(
         strategy.assetCode,
-        selectedSeriesCode.value,
+        seriesCode,
         strategy.assetType,
-      ),
-      optionCalcApi.getVolatilityGraph(
-        strategy.assetCode,
-        selectedSeriesCode.value,
-        strategy.assetType,
-      ),
-    ])
-    if (boardResult.status === 'fulfilled' && boardResult.value.rows.length) {
-      board.value = boardResult.value.rows
-    } else {
-      board.value = []
-      globalThis.console.error(
-        '[MOEX Options] Option board error:',
-        boardResult.status === 'rejected' ? boardResult.reason : 'backend returned an empty board',
+        options,
       )
-    }
-    const invalidSmileIndex =
-      smileResult.status === 'fulfilled'
-        ? smileResult.value.findIndex(
-            (point) => !Number.isFinite(point.strike) || !Number.isFinite(point.volatility),
-          )
-        : -1
-    if (smileResult.status === 'fulfilled' && smileResult.value.length && invalidSmileIndex < 0) {
-      smile.value = smileResult.value
+      if (controller.signal.aborted || dataController !== controller) return
+      if (!result.length) throw new Error('backend returned an empty graph')
+      const invalidIndex = result.findIndex(
+        (point) => !Number.isFinite(point.strike) || !Number.isFinite(point.volatility),
+      )
+      if (invalidIndex >= 0)
+        throw new Error(`backend returned an invalid point at index ${invalidIndex}`)
+      smile.value = result
     } else {
-      smile.value = []
-      const reason =
-        smileResult.status === 'rejected'
-          ? smileResult.reason
-          : !smileResult.value.length
-            ? 'backend returned an empty graph'
-            : `backend returned an invalid point at index ${invalidSmileIndex}`
-      globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
+      const result = await optionCalcApi.getOptionBoard(
+        strategy.assetCode,
+        seriesCode,
+        strategy.assetType,
+        options,
+      )
+      if (controller.signal.aborted || dataController !== controller) return
+      if (!result.rows.length) throw new Error('Бэкенд вернул пустую доску опционов')
+      board.value = result.rows
     }
-    if (boardResult.status === 'rejected') throw boardResult.reason
-    if (!boardResult.value.rows.length) throw new Error('Бэкенд вернул пустую доску опционов')
-    const quoteSecid = selectedSeries.value?.futures_code || strategy.assetCode
-    const quote = await resolveBoardMarketPrice(boardResult.value, quoteSecid)
-    if (quote.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
-    strategy.marketPrice = quote.price
   } catch (reason) {
-    marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
+    if (controller.signal.aborted || dataController !== controller || isAbortError(reason)) return
+    if (tab === 'smile') {
+      globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
+    } else {
+      globalThis.console.error('[MOEX Options] Option board error:', reason)
+      marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
+    }
   } finally {
-    loadingMarket.value = false
+    if (dataController === controller) {
+      dataController = undefined
+      loadingMarket.value = false
+    }
   }
 }
 
@@ -392,11 +410,57 @@ function handleLegendSelection(event: { selected?: Record<string, boolean> }): v
 }
 
 watch(
-  () => [store.activeId, store.activeStrategy?.assetCode, store.activeStrategy?.assetType],
-  loadMarketData,
+  () => [
+    store.activeId,
+    store.activeStrategy?.assetCode,
+    store.activeStrategy?.assetType,
+    store.activeStrategy?.positions.map((position) => position.optionSeriesCode).join(','),
+  ],
+  () => {
+    seriesController?.abort()
+    dataController?.abort()
+    seriesController = undefined
+    dataController = undefined
+    seriesLoaded = false
+    series.value = []
+    selectedSeriesCode.value = ''
+    board.value = []
+    smile.value = []
+    marketError.value = null
+    loadingMarket.value = false
+    void loadMarketData()
+  },
   { immediate: true },
 )
 watch(selectedSeriesCode, loadSeriesData)
+watch(
+  activeTab,
+  (tab) => {
+    store.profileVisible = tab === 'profile'
+    dataController?.abort()
+    if (tab === 'profile') {
+      seriesController?.abort()
+      loadingMarket.value = false
+      marketError.value = null
+    } else if (seriesLoaded) {
+      void loadSeriesData()
+    } else {
+      void loadMarketData()
+    }
+  },
+  { immediate: true },
+)
+watch(
+  () => store.calculation.calculatedAt,
+  (calculatedAt) => {
+    if (calculatedAt && activeTab.value !== 'profile' && !loadingMarket.value) void loadSeriesData()
+  },
+)
+onBeforeUnmount(() => {
+  seriesController?.abort()
+  dataController?.abort()
+  store.profileVisible = false
+})
 </script>
 
 <template>
@@ -446,6 +510,12 @@ watch(selectedSeriesCode, loadSeriesData)
       >
         <VChart :option="profileOption" autoresize @legendselectchanged="handleLegendSelection" />
       </div>
+      <div
+        v-else-if="store.calculation.loading || store.calculation.graphLoading[indicator]"
+        class="chart-empty"
+      >
+        <LoaderCircle :size="28" class="spinning" /><strong>Расчёт…</strong>
+      </div>
       <div v-else class="chart-empty">
         <LineChartIcon :size="28" />
         <strong>Профиль появится после расчёта</strong>
@@ -453,6 +523,9 @@ watch(selectedSeriesCode, loadSeriesData)
       </div>
     </template>
 
+    <div v-else-if="loadingMarket" class="chart-empty">
+      <LoaderCircle :size="28" class="spinning" /><strong>Загрузка…</strong>
+    </div>
     <template v-else-if="activeTab === 'smile'">
       <div v-if="smile.length" class="chart-frame" data-testid="smile-chart">
         <VChart :option="smileOption" autoresize />

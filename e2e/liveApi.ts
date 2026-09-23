@@ -59,15 +59,25 @@ export interface CatalogEntry {
 export async function getJson<T>(request: APIRequestContext, path: string): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    let retry = true
     try {
       const response = await request.get(path, { timeout: 25_000 })
       if (response.ok()) return response.json() as Promise<T>
-      const body = (await response.text()).slice(0, 300)
-      lastError = new Error(`GET ${path} returned ${response.status()}: ${body}`)
-      if (response.status() < 429 && response.status() < 500) throw lastError
+      const text = await response.text()
+      let body: { code?: unknown; retryable?: unknown } | null = null
+      try {
+        body = JSON.parse(text)
+      } catch {
+        /* Legacy errors need not be JSON. */
+      }
+      lastError = new Error(`GET ${path} returned ${response.status()}: ${text.slice(0, 300)}`)
+      retry =
+        (response.status() === 408 || response.status() === 429 || response.status() >= 500) &&
+        !(typeof body?.code === 'string' && typeof body.retryable === 'boolean')
     } catch (error) {
       lastError = error
     }
+    if (!retry || attempt === 3) break
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt))
   }
   throw lastError
@@ -82,7 +92,10 @@ function theoretical(rows: OptionRow[]): OptionRow[] {
     (row) =>
       Number.isFinite(row.strike) &&
       Number.isFinite(row.theorprice) &&
-      Number.isFinite(row.volatility),
+      Number.isFinite(row.volatility) &&
+      row.strike > 0 &&
+      row.theorprice! >= 0 &&
+      row.volatility! > 0,
   )
 }
 
@@ -162,7 +175,13 @@ export function discoverLiveCase(page: Page): Promise<LiveCase> {
         ),
       )
       const entry = { asset, series: seriesList }
-      for (const series of entry.series.slice(0, 8)) {
+      const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow' }).format(
+        new Date(),
+      )
+      const activeSeries = entry.series
+        .filter((series) => series.expiration_date >= today)
+        .sort((a, b) => a.expiration_date.localeCompare(b.expiration_date))
+      for (const series of activeSeries.slice(0, 8)) {
         try {
           const board = await getJson<OptionBoard>(
             page.request,
@@ -180,6 +199,9 @@ export function discoverLiveCase(page: Page): Promise<LiveCase> {
       }
     }
     throw new Error('No active option series with theoretical Call and Put prices was found')
-  })()
+  })().catch((error: unknown) => {
+    liveCasePromise = undefined
+    throw error
+  })
   return liveCasePromise
 }

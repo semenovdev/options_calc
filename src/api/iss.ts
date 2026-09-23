@@ -1,6 +1,7 @@
 import type { InstrumentSpecification, InstrumentType, MarketPrice } from '@/types/moex'
 
-import { queryString, requestJson } from './http'
+import type { ApiRequestOptions } from './optionCalc'
+import { queryString, requestSharedJson } from './http'
 
 interface IssBlock {
   columns: string[]
@@ -51,19 +52,23 @@ function bestPriceRow(items: Record<string, unknown>[]): Record<string, unknown>
   return items.find(hasPrice)
 }
 
-export async function getMarketPrice(secid: string): Promise<MarketPrice> {
+export async function getMarketPrice(
+  secid: string,
+  options?: ApiRequestOptions,
+): Promise<MarketPrice> {
   const columns = 'SECID,BID,OFFER,LAST,UPDATETIME'
-  const response = await requestJson<IssSecurityResponse>(
+  const response = await requestSharedJson<IssSecurityResponse>(
     `/moex-iss/securities/${encodeURIComponent(secid)}.json${queryString({
       'iss.meta': 'off',
       'iss.only': 'marketdata,securities',
       'marketdata.columns': columns,
       'securities.columns': columns,
     })}`,
+    options,
   )
   let row = bestPriceRow([...rows(response.marketdata), ...rows(response.securities)]) ?? {}
   if (!hasPrice(row)) {
-    const futuresResponse = await requestJson<IssSecurityResponse>(
+    const futuresResponse = await requestSharedJson<IssSecurityResponse>(
       `/moex-iss/engines/futures/markets/forts/securities/${encodeURIComponent(secid)}.json${queryString(
         {
           'iss.meta': 'off',
@@ -71,11 +76,12 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
           'marketdata.columns': columns,
         },
       )}`,
+      options,
     )
     row = bestPriceRow(rows(futuresResponse.marketdata)) ?? row
   }
   if (!hasPrice(row)) {
-    const sharesResponse = await requestJson<IssSecurityResponse>(
+    const sharesResponse = await requestSharedJson<IssSecurityResponse>(
       `/moex-iss/engines/stock/markets/shares/securities/${encodeURIComponent(secid)}.json${queryString(
         {
           'iss.meta': 'off',
@@ -83,6 +89,7 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
           'marketdata.columns': columns,
         },
       )}`,
+      options,
     )
     row = bestPriceRow(rows(sharesResponse.marketdata)) ?? row
   }
@@ -98,17 +105,18 @@ export async function getMarketPrice(secid: string): Promise<MarketPrice> {
 export async function getInstrumentSpecification(
   secid: string,
   type: Extract<InstrumentType, 'futures' | 'share'>,
+  options?: ApiRequestOptions,
 ): Promise<InstrumentSpecification> {
   const market = type === 'futures' ? 'futures/markets/forts' : 'stock/markets/shares'
   const columns = 'SECID,BID,OFFER,LAST,UPDATETIME'
-  const response = await requestJson<IssSecurityResponse>(
+  const response = await requestSharedJson<IssSecurityResponse>(
     `/moex-iss/engines/${market}/securities/${encodeURIComponent(secid)}.json${queryString({
       'iss.meta': 'off',
       'iss.only': 'marketdata,securities',
       'marketdata.columns': columns,
       'securities.columns': 'SECID,MINSTEP,STEPPRICE,LOTSIZE',
     })}`,
-    { retries: 2 },
+    { ...options, retries: 2 },
   )
   const marketRow = bestPriceRow(rows(response.marketdata))
   const securityRow = rows(response.securities)[0]

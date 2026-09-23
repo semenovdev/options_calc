@@ -150,6 +150,7 @@ export interface CalculatedPortfolio {
   positions: CalculatedPosition[]
   total: PortfolioTotals
   initial_margin?: number | null
+  valuation_context?: ValuationContext | null
 }
 
 export interface IndicatorPoint {
@@ -161,6 +162,7 @@ export interface IndicatorGraph {
   now: IndicatorPoint[]
   on_expiration: IndicatorPoint[]
   on_what_if?: IndicatorPoint[] | null
+  valuation_context?: ValuationContext | null
 }
 
 export interface MarketPrice {

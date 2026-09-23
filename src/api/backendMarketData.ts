@@ -1,11 +1,12 @@
 import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
-import { optionCalcApi } from '@/api/optionCalc'
+import { optionCalcApi, type ApiRequestOptions } from '@/api/optionCalc'
 import type {
   AssetType,
   Future,
   InstrumentSpecification,
   MarketPrice,
   OptionBoard,
+  ValuationContext,
 } from '@/types/moex'
 
 function positive(value: number | null | undefined): value is number {
@@ -40,10 +41,9 @@ function futureMarketPrice(future: Future): MarketPrice | null {
   return null
 }
 
-export function boardMarketPrice(board: OptionBoard): MarketPrice | null {
-  const context = board.valuationContext
-  if (!context) return null
-  if (!positive(context.underlying_price) || !context.underlying_secid) {
+export function valuationMarketPrice(context?: ValuationContext | null): MarketPrice | null {
+  if (context === undefined) return null
+  if (!context || !positive(context.underlying_price) || !context.underlying_secid) {
     throw new Error('Бэкенд не прислал цену базового актива в valuation_context')
   }
   return {
@@ -54,31 +54,38 @@ export function boardMarketPrice(board: OptionBoard): MarketPrice | null {
   }
 }
 
+export function boardMarketPrice(board: OptionBoard): MarketPrice | null {
+  return board.valuationContext ? valuationMarketPrice(board.valuationContext) : null
+}
+
 export async function resolveBoardMarketPrice(
   board: OptionBoard,
   fallbackSecid: string,
+  options?: ApiRequestOptions,
 ): Promise<MarketPrice> {
-  return boardMarketPrice(board) ?? getMarketPrice(fallbackSecid)
+  return boardMarketPrice(board) ?? getMarketPrice(fallbackSecid, options)
 }
 
 export async function resolveFutureMarketPrice(
   assetCode: string,
   secid: string,
+  options?: ApiRequestOptions,
 ): Promise<MarketPrice> {
-  const futures = await optionCalcApi.getFutures(assetCode)
+  const futures = await optionCalcApi.getFutures(assetCode, undefined, options)
   const future = futures.find((item) => item.futures_code === secid)
   if (!future) throw new Error(`Бэкенд не вернул фьючерс ${secid}`)
-  return futureMarketPrice(future) ?? getMarketPrice(secid)
+  return futureMarketPrice(future) ?? getMarketPrice(secid, options)
 }
 
 export async function resolveLinearSpecification(
   assetCode: string,
   secid: string,
   type: 'futures' | 'share',
+  options?: ApiRequestOptions,
 ): Promise<InstrumentSpecification> {
-  if (type === 'share') return getInstrumentSpecification(secid, type)
+  if (type === 'share') return getInstrumentSpecification(secid, type, options)
 
-  const futures = await optionCalcApi.getFutures(assetCode)
+  const futures = await optionCalcApi.getFutures(assetCode, undefined, options)
   const future = futures.find((item) => item.futures_code === secid)
   if (!future) throw new Error(`Бэкенд не вернул фьючерс ${secid}`)
   const market = futureMarketPrice(future)
@@ -86,7 +93,7 @@ export async function resolveLinearSpecification(
     future.min_step !== undefined ||
     future.step_price !== undefined ||
     future.lot_size !== undefined
-  if (!hasSpecificationFields) return getInstrumentSpecification(secid, type)
+  if (!hasSpecificationFields) return getInstrumentSpecification(secid, type, options)
   if (
     !market ||
     !positive(future.min_step) ||
@@ -110,11 +117,17 @@ export async function resolveUnderlyingMarketPrice(
   assetType: AssetType,
   secid: string,
   optionSeriesCode?: string,
+  options?: ApiRequestOptions,
 ): Promise<MarketPrice> {
   if (optionSeriesCode) {
-    const board = await optionCalcApi.getOptionBoard(assetCode, optionSeriesCode, assetType)
-    return resolveBoardMarketPrice(board, secid)
+    const board = await optionCalcApi.getOptionBoard(
+      assetCode,
+      optionSeriesCode,
+      assetType,
+      options,
+    )
+    return resolveBoardMarketPrice(board, secid, options)
   }
-  if (assetType === 'futures') return resolveFutureMarketPrice(assetCode, secid)
-  return getMarketPrice(secid)
+  if (assetType === 'futures') return resolveFutureMarketPrice(assetCode, secid, options)
+  return getMarketPrice(secid, options)
 }

@@ -1,12 +1,28 @@
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { resolveLinearSpecification, resolveUnderlyingMarketPrice } from '@/api/backendMarketData'
+import {
+  resolveLinearSpecification,
+  resolveUnderlyingMarketPrice,
+  valuationMarketPrice,
+} from '@/api/backendMarketData'
+import { isAbortError } from '@/api/http'
 import { optionCalcApi } from '@/api/optionCalc'
-import type { IndicatorGraph, IndicatorType } from '@/types/moex'
+import type {
+  CalculatedPortfolio,
+  IndicatorGraph,
+  IndicatorType,
+  PortfolioRequest,
+  PortfolioTotals,
+} from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
-import { addLinearPositionsToGraph, linearMultiplier, linearPnl } from '@/utils/linearPnl'
+import {
+  addLinearPositionsToGraph,
+  linearMultiplier,
+  linearPnl,
+  type LinearPosition,
+} from '@/utils/linearPnl'
 import { indicatorValueAt } from '@/utils/options'
 import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
 
@@ -21,20 +37,26 @@ const indicatorLabels: Record<IndicatorType, string> = {
   rho: 'Rho',
 }
 
-function graphValidationError(graph: IndicatorGraph): string | null {
+function graphValidationError(graph: IndicatorGraph | null | undefined): string | null {
+  if (!graph) return 'backend returned no graph'
   for (const series of ['now', 'on_expiration'] as const) {
     const points = graph[series]
+    if (!Array.isArray(points)) return `backend returned an invalid ${series} series`
     if (!points.length) return `backend returned an empty ${series} series`
     const invalidIndex = points.findIndex(
-      (point) => !Number.isFinite(point.underlying_price) || !Number.isFinite(point.value),
+      (point) =>
+        !point || !Number.isFinite(point.underlying_price) || !Number.isFinite(point.value),
     )
     if (invalidIndex >= 0) {
       return `backend returned an invalid point in ${series} at index ${invalidIndex}`
     }
   }
 
+  if (graph.on_what_if != null && !Array.isArray(graph.on_what_if)) {
+    return 'backend returned an invalid on_what_if series'
+  }
   const invalidScenarioIndex = graph.on_what_if?.findIndex(
-    (point) => !Number.isFinite(point.underlying_price) || !Number.isFinite(point.value),
+    (point) => !point || !Number.isFinite(point.underlying_price) || !Number.isFinite(point.value),
   )
   return invalidScenarioIndex !== undefined && invalidScenarioIndex >= 0
     ? `backend returned an invalid point in on_what_if at index ${invalidScenarioIndex}`
@@ -68,36 +90,19 @@ function restore(): { strategies: Strategy[]; activeId: string } {
   return { strategies: [strategy], activeId: strategy.id }
 }
 
-async function loadOptionGraphs(
-  payload: ReturnType<typeof toPortfolioRequest>,
-): Promise<Partial<Record<IndicatorType, IndicatorGraph>>> {
-  const graphs: Partial<Record<IndicatorType, IndicatorGraph>> = {}
-  const concurrency = 2
-  for (let index = 0; index < indicators.length; index += concurrency) {
-    const batch = indicators.slice(index, index + concurrency)
-    const results = await Promise.allSettled(
-      batch.map((indicator) => optionCalcApi.getPortfolioGraph(indicator, payload)),
-    )
-    results.forEach((result, resultIndex) => {
-      const indicator = batch[resultIndex]!
-      if (result.status === 'rejected') {
-        globalThis.console.error(
-          `[MOEX Options] ${indicatorLabels[indicator]} chart error:`,
-          result.reason,
-        )
-        return
-      }
-      const validationError = graphValidationError(result.value)
-      if (validationError) {
-        globalThis.console.error(
-          `[MOEX Options] ${indicatorLabels[indicator]} chart error: ${validationError}`,
-        )
-        return
-      }
-      graphs[indicator] = result.value
-    })
-  }
-  return graphs
+interface PreparedCalculation {
+  portfolio: CalculatedPortfolio
+  linear: LinearPosition[]
+  spot: number
+}
+
+interface CalculationRun {
+  controller: AbortController
+  payload: PortfolioRequest
+  hasScenario: boolean
+  scenarioTotals: PortfolioTotals
+  ready: Promise<PreparedCalculation>
+  graphs: Map<IndicatorType, Promise<void>>
 }
 
 export const usePortfolioStore = defineStore('portfolio', () => {
@@ -105,14 +110,17 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   const strategies = ref<Strategy[]>(restored.strategies)
   const activeId = ref(restored.activeId)
   const focusedPositionId = ref<string | null>(null)
+  const selectedIndicator = ref<IndicatorType>('profit_and_loss')
+  const profileVisible = ref(true)
   const calculation = reactive<CalculationState>({
     portfolio: null,
     graphs: {},
+    graphLoading: {},
     loading: false,
     error: null,
     calculatedAt: null,
   })
-  let calculationRequestId = 0
+  let currentRun: CalculationRun | undefined
 
   const activeStrategy = computed(() =>
     strategies.value.find((strategy) => strategy.id === activeId.value),
@@ -132,12 +140,17 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   )
 
   function resetCalculation(): void {
-    calculationRequestId += 1
+    currentRun?.controller.abort()
+    currentRun = undefined
     calculation.portfolio = null
     calculation.graphs = {}
+    calculation.graphLoading = {}
+    calculation.loading = false
     calculation.error = null
     calculation.calculatedAt = null
   }
+
+  onScopeDispose(() => currentRun?.controller.abort())
 
   function selectStrategy(id: string): void {
     activeId.value = id
@@ -189,83 +202,78 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     resetCalculation()
   }
 
-  async function calculate(): Promise<void> {
-    const strategy = activeStrategy.value
-    if (!strategy?.positions.length) return
-    const requestId = ++calculationRequestId
-    calculation.loading = true
-    calculation.error = null
-    calculation.portfolio = null
-    calculation.graphs = {}
-    calculation.calculatedAt = null
-    const selectedPositions = focusedPosition.value ? [focusedPosition.value] : strategy.positions
+  async function prepareCalculation(
+    strategy: Strategy,
+    selectedPositions: Position[],
+    signal: AbortSignal,
+  ): Promise<PreparedCalculation> {
     const optionPositions = selectedPositions.filter((position) => position.type === 'option')
     const linearPositions = selectedPositions.filter(
       (position): position is Position & { type: 'futures' | 'share' } =>
         position.type === 'futures' || position.type === 'share',
     )
-    try {
-      const quoteSecid =
-        selectedPositions.find((position) => position.underlyingFutureCode)?.underlyingFutureCode ??
-        selectedPositions.find((position) => position.type === 'futures')?.secid ??
-        strategy.assetCode
-      const optionSeriesCode = selectedPositions.find(
-        (position) => position.type === 'option' && position.optionSeriesCode,
-      )?.optionSeriesCode
-      const marketPromise = resolveUnderlyingMarketPrice(
-        strategy.assetCode,
-        strategy.assetType,
-        quoteSecid,
-        optionSeriesCode,
-      )
-      const linearPromise = Promise.all(
+    const options = { signal }
+    const optionPayload = toPortfolioRequest(strategy, optionPositions)
+    const [fullPortfolio, optionPortfolio, linear] = await Promise.all([
+      linearPositions.length
+        ? optionCalcApi.calculatePortfolio(
+            { ...toPortfolioRequest(strategy, selectedPositions), what_if: undefined },
+            options,
+          )
+        : Promise.resolve(undefined),
+      optionPositions.length
+        ? optionCalcApi.calculatePortfolio({ ...optionPayload, what_if: undefined }, options)
+        : Promise.resolve(undefined),
+      Promise.all(
         linearPositions.map(async (position) => ({
           position,
           specification: await resolveLinearSpecification(
             strategy.assetCode,
             position.secid,
             position.type,
+            options,
           ),
         })),
-      )
-      const optionPayload = toPortfolioRequest(strategy, optionPositions)
-      const currentPortfolioPayload = {
-        ...toPortfolioRequest(strategy, selectedPositions),
-        what_if: undefined,
-      }
-      const currentOptionPayload = { ...optionPayload, what_if: undefined }
-      const optionGraphsPromise = optionPositions.length
-        ? loadOptionGraphs(optionPayload)
-        : Promise.resolve({} as Partial<Record<IndicatorType, IndicatorGraph>>)
-      const [fullPortfolio, optionPortfolio, market, linear] = await Promise.all([
-        linearPositions.length
-          ? optionCalcApi.calculatePortfolio(currentPortfolioPayload)
-          : Promise.resolve(undefined),
-        optionPositions.length
-          ? optionCalcApi.calculatePortfolio(currentOptionPayload)
-          : Promise.resolve(undefined),
-        marketPromise,
-        linearPromise,
-      ])
-      if (market.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
-      const spot = market.price
-      strategy.marketPrice = market.price
-      const linearPnlNow = linear.reduce(
-        (total, item) => total + linearPnl(item, item.specification.price),
-        0,
-      )
-      const linearDelta = linear.reduce(
-        (total, item) => total + item.position.quantity * linearMultiplier(item),
-        0,
-      )
-      const totals = { ...(optionPortfolio?.total ?? {}) }
-      const addLinearValue = (value: number | null | undefined, linearValue: number) =>
-        value == null ? (optionPositions.length ? value : linearValue) : value + linearValue
-      totals.profit_and_loss = addLinearValue(totals.profit_and_loss, linearPnlNow)
-      totals.profit_and_loss_rub = addLinearValue(totals.profit_and_loss_rub, linearPnlNow)
-      totals.delta = addLinearValue(totals.delta, linearDelta)
-      if (requestId !== calculationRequestId) return
-      calculation.portfolio = {
+      ),
+    ])
+    signal.throwIfAborted()
+    const quoteSecid =
+      selectedPositions.find((position) => position.underlyingFutureCode)?.underlyingFutureCode ??
+      selectedPositions.find((position) => position.type === 'futures')?.secid ??
+      strategy.assetCode
+    const optionSeriesCode = optionPositions.find(
+      (position) => position.optionSeriesCode,
+    )?.optionSeriesCode
+    const valuationContext = (fullPortfolio ?? optionPortfolio)?.valuation_context
+    const market =
+      valuationMarketPrice(valuationContext) ??
+      (await resolveUnderlyingMarketPrice(
+        strategy.assetCode,
+        strategy.assetType,
+        quoteSecid,
+        optionSeriesCode,
+        options,
+      ))
+    signal.throwIfAborted()
+    if (market.price === null) throw new Error(`Нет текущей цены базового актива ${quoteSecid}`)
+    const linearPnlNow = linear.reduce(
+      (total, item) => total + linearPnl(item, item.specification.price),
+      0,
+    )
+    const linearDelta = linear.reduce(
+      (total, item) => total + item.position.quantity * linearMultiplier(item),
+      0,
+    )
+    const totals = { ...(optionPortfolio?.total ?? {}) }
+    const addLinearValue = (value: number | null | undefined, linearValue: number) =>
+      value == null ? (optionPositions.length ? value : linearValue) : value + linearValue
+    totals.profit_and_loss = addLinearValue(totals.profit_and_loss, linearPnlNow)
+    totals.profit_and_loss_rub = addLinearValue(totals.profit_and_loss_rub, linearPnlNow)
+    totals.delta = addLinearValue(totals.delta, linearDelta)
+    return {
+      spot: market.price,
+      linear,
+      portfolio: {
         positions: [
           ...(optionPortfolio?.positions ?? []),
           ...linear.map(({ position, specification }) => ({
@@ -282,38 +290,132 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         initial_margin: linearPositions.length
           ? fullPortfolio?.initial_margin
           : optionPortfolio?.initial_margin,
-      }
-      calculation.calculatedAt = new Date().toISOString()
-
-      const optionGraphs = await optionGraphsPromise
-      const graphs = Object.fromEntries(
-        indicators.flatMap((indicator) => {
-          const optionGraph = optionGraphs[indicator]
-          if (!optionGraph && optionPositions.length) return []
-          return [[indicator, addLinearPositionsToGraph(optionGraph, linear, indicator, spot)]]
-        }),
-      ) as Partial<Record<IndicatorType, IndicatorGraph>>
-      const hasScenario =
-        Boolean(strategy.volatilityShift) || strategy.calculationDate !== todayMoscow()
-      if (hasScenario) {
-        indicators.forEach((indicator) => {
-          const points = graphs[indicator]?.on_what_if
-          const value = points ? indicatorValueAt(points, spot) : null
-          if (value === null) return
-          totals[indicator] = value
-          if (indicator === 'profit_and_loss') totals.profit_and_loss_rub = value
-        })
-      }
-      if (requestId !== calculationRequestId) return
-      if (calculation.portfolio) calculation.portfolio.total = totals
-      calculation.graphs = graphs
-    } catch (error) {
-      if (requestId !== calculationRequestId) return
-      calculation.error = error instanceof Error ? error.message : 'Не удалось рассчитать портфель'
-    } finally {
-      if (requestId === calculationRequestId) calculation.loading = false
+        ...(valuationContext !== undefined ? { valuation_context: valuationContext } : {}),
+      },
     }
   }
+
+  function loadGraph(indicator: IndicatorType, run = currentRun): Promise<void> {
+    if (
+      !run ||
+      run !== currentRun ||
+      run.controller.signal.aborted ||
+      calculation.graphs[indicator]
+    ) {
+      return Promise.resolve()
+    }
+    const pending = run.graphs.get(indicator)
+    if (pending) return pending
+    calculation.graphLoading[indicator] = true
+    const request = (async () => {
+      const [graphResult, contextResult] = await Promise.allSettled([
+        run.payload.positions.length
+          ? optionCalcApi.getPortfolioGraph(indicator, run.payload, {
+              signal: run.controller.signal,
+            })
+          : Promise.resolve(undefined),
+        run.ready,
+      ])
+      if (
+        currentRun !== run ||
+        run.controller.signal.aborted ||
+        contextResult.status === 'rejected'
+      )
+        return
+      if (graphResult.status === 'rejected') {
+        if (!isAbortError(graphResult.reason)) {
+          globalThis.console.error(
+            `[MOEX Options] ${indicatorLabels[indicator]} chart error:`,
+            graphResult.reason,
+          )
+        }
+        return
+      }
+      const validationError =
+        run.payload.positions.length && graphValidationError(graphResult.value)
+      if (validationError) {
+        globalThis.console.error(
+          `[MOEX Options] ${indicatorLabels[indicator]} chart error: ${validationError}`,
+        )
+        return
+      }
+      const { linear, spot } = contextResult.value
+      const graph = addLinearPositionsToGraph(graphResult.value, linear, indicator, spot)
+      calculation.graphs[indicator] = graph
+      if (run.hasScenario && graph.on_what_if) {
+        const value = indicatorValueAt(graph.on_what_if, spot)
+        if (value !== null) {
+          run.scenarioTotals[indicator] = value
+          if (indicator === 'profit_and_loss') run.scenarioTotals.profit_and_loss_rub = value
+        }
+      }
+    })().finally(() => {
+      run.graphs.delete(indicator)
+      if (currentRun === run) calculation.graphLoading[indicator] = false
+    })
+    run.graphs.set(indicator, request)
+    return request
+  }
+
+  async function calculate(): Promise<void> {
+    const active = activeStrategy.value
+    if (!active?.positions.length) return
+    const selectedPositions = (
+      focusedPosition.value ? [focusedPosition.value] : active.positions
+    ).map((position) => ({ ...position }))
+    const strategy = { ...active, positions: selectedPositions }
+    resetCalculation()
+    active.marketPrice = null
+    calculation.loading = true
+    const controller = new AbortController()
+    const run: CalculationRun = {
+      controller,
+      payload: toPortfolioRequest(
+        strategy,
+        selectedPositions.filter((position) => position.type === 'option'),
+      ),
+      hasScenario: Boolean(strategy.volatilityShift) || strategy.calculationDate !== todayMoscow(),
+      scenarioTotals: {},
+      ready: prepareCalculation(strategy, selectedPositions, controller.signal),
+      graphs: new Map(),
+    }
+    currentRun = run
+    // The visible graph starts alongside portfolio valuation and is published independently.
+    const visibleGraph = profileVisible.value
+      ? loadGraph(selectedIndicator.value, run)
+      : Promise.resolve()
+    try {
+      const prepared = await run.ready
+      if (currentRun !== run) return
+      active.marketPrice = prepared.spot
+      calculation.portfolio = prepared.portfolio
+      calculation.calculatedAt = new Date().toISOString()
+    } catch (error) {
+      if (currentRun !== run || isAbortError(error)) return
+      calculation.error = error instanceof Error ? error.message : 'Не удалось рассчитать портфель'
+      controller.abort()
+    } finally {
+      if (currentRun === run) calculation.loading = false
+    }
+    await visibleGraph
+    // Scenario totals need every Greek; ordinary profile browsing only loads the selected graph.
+    if (run.hasScenario) {
+      const remaining = indicators.filter((indicator) => !calculation.graphs[indicator])
+      for (let index = 0; index < remaining.length; index += 2) {
+        if (currentRun !== run || controller.signal.aborted) break
+        await Promise.all(
+          remaining.slice(index, index + 2).map((indicator) => loadGraph(indicator, run)),
+        )
+      }
+      if (currentRun === run && calculation.portfolio) {
+        calculation.portfolio.total = { ...calculation.portfolio.total, ...run.scenarioTotals }
+      }
+    }
+  }
+
+  watch([selectedIndicator, profileVisible], ([indicator, visible]) => {
+    if (visible) void loadGraph(indicator)
+  })
 
   return {
     strategies,
@@ -321,6 +423,8 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     activeStrategy,
     focusedPositionId,
     focusedPosition,
+    selectedIndicator,
+    profileVisible,
     calculation,
     selectStrategy,
     addStrategy,
@@ -329,6 +433,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     updatePosition,
     removePosition,
     calculate,
+    loadGraph,
     resetCalculation,
   }
 })

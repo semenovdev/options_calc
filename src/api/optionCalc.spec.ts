@@ -91,4 +91,28 @@ describe('optionCalcApi', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(first).toEqual(second)
   })
+
+  it.each(['board', 'futures', 'series', 'smile'] as const)(
+    'shares overlapping %s reads and refreshes on the next call',
+    async (kind) => {
+      const fetchMock = vi.fn(async () => {
+        const body = kind === 'board' ? { call: [], put: [] } : []
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const load = () => {
+        if (kind === 'board') return optionCalcApi.getOptionBoard('SI', 'SERIES', 'futures')
+        if (kind === 'futures') return optionCalcApi.getFutures('SI')
+        if (kind === 'series') return optionCalcApi.getSeries('SI', 'futures')
+        return optionCalcApi.getVolatilityGraph('SI', 'SERIES', 'futures')
+      }
+      await Promise.all([load(), load()])
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await load()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    },
+  )
 })

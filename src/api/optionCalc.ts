@@ -13,53 +13,54 @@ import type {
 } from '@/types/moex'
 import { appConfig } from '@/config'
 
-import { queryString, requestJson } from './http'
+import { queryString, requestSharedJson } from './http'
 
-const portfolioRequests = new Map<string, Promise<CalculatedPortfolio>>()
+export type ApiRequestOptions = Pick<RequestInit, 'signal'>
 
-function calculatePortfolio(payload: PortfolioRequest): Promise<CalculatedPortfolio> {
-  const key = JSON.stringify(payload)
-  const pending = portfolioRequests.get(key)
-  if (pending) return pending
-
-  const request = requestJson<CalculatedPortfolio>(`${appConfig.optionCalcBaseUrl}/portfolio/`, {
+function calculatePortfolio(
+  payload: PortfolioRequest,
+  options?: ApiRequestOptions,
+): Promise<CalculatedPortfolio> {
+  return requestSharedJson<CalculatedPortfolio>(`${appConfig.optionCalcBaseUrl}/portfolio/`, {
+    ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: key,
+    body: JSON.stringify(payload),
     retries: 2,
-  }).finally(() => {
-    if (portfolioRequests.get(key) === request) portfolioRequests.delete(key)
   })
-  portfolioRequests.set(key, request)
-  return request
 }
 
 export const optionCalcApi = {
-  searchAssets(query: string, assetType?: AssetType) {
-    return requestJson<Asset[]>(
+  searchAssets(query: string, assetType?: AssetType, options?: ApiRequestOptions) {
+    return requestSharedJson<Asset[]>(
       `${appConfig.optionCalcBaseUrl}/assets${queryString({ query, asset_type: assetType })}`,
-      { retries: 2 },
+      { ...options, retries: 2 },
     )
   },
 
-  getFutures(assetCode: string, expirationDate?: string) {
-    return requestJson<Future[]>(
+  getFutures(assetCode: string, expirationDate?: string, options?: ApiRequestOptions) {
+    return requestSharedJson<Future[]>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/futures${queryString({ expiration_date: expirationDate })}`,
-      { retries: 2 },
+      { ...options, retries: 2 },
     )
   },
 
-  getSeries(assetCode: string, assetType?: AssetType) {
-    return requestJson<OptionSeries[]>(
+  getSeries(assetCode: string, assetType?: AssetType, options?: ApiRequestOptions) {
+    return requestSharedJson<OptionSeries[]>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/optionseries${queryString({ asset_type: assetType })}`,
-      { retries: 2 },
+      { ...options, retries: 2 },
     )
   },
 
-  getOptionBoard(assetCode: string, seriesCode: string, assetType?: AssetType) {
-    return requestJson<OptionBoardResponse>(
+  getOptionBoard(
+    assetCode: string,
+    seriesCode: string,
+    assetType?: AssetType,
+    options?: ApiRequestOptions,
+  ) {
+    return requestSharedJson<OptionBoardResponse>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/optionboard${queryString({ asset_type: assetType })}`,
-      { retries: 2 },
+      { ...options, retries: 2 },
     ).then(
       (board): OptionBoard => ({
         rows: [
@@ -71,19 +72,29 @@ export const optionCalcApi = {
     )
   },
 
-  getVolatilityGraph(assetCode: string, seriesCode: string, assetType?: AssetType) {
-    return requestJson<VolatilityPoint[]>(
+  getVolatilityGraph(
+    assetCode: string,
+    seriesCode: string,
+    assetType?: AssetType,
+    options?: ApiRequestOptions,
+  ) {
+    return requestSharedJson<VolatilityPoint[]>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/volatility_graph${queryString({ asset_type: assetType })}`,
-      { retries: 2 },
+      { ...options, retries: 2 },
     )
   },
 
   calculatePortfolio,
 
-  getPortfolioGraph(indicator: IndicatorType, payload: PortfolioRequest) {
-    return requestJson<IndicatorGraph>(
+  getPortfolioGraph(
+    indicator: IndicatorType,
+    payload: PortfolioRequest,
+    options?: ApiRequestOptions,
+  ) {
+    return requestSharedJson<IndicatorGraph>(
       `${appConfig.optionCalcBaseUrl}/portfolio/graph/${indicator}`,
       {
+        ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

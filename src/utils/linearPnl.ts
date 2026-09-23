@@ -49,6 +49,9 @@ export function addLinearPositionsToGraph(
     }))
   }
   return {
+    ...(graph?.valuation_context !== undefined
+      ? { valuation_context: graph.valuation_context }
+      : {}),
     now: adjust(graph?.now),
     on_expiration: adjust(graph?.on_expiration),
     on_what_if: graph?.on_what_if ? adjust(graph.on_what_if) : null,

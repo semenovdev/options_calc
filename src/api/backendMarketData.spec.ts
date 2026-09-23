@@ -8,6 +8,7 @@ import {
   resolveBoardMarketPrice,
   resolveFutureMarketPrice,
   resolveLinearSpecification,
+  valuationMarketPrice,
 } from './backendMarketData'
 
 vi.mock('@/api/iss', () => ({
@@ -59,7 +60,7 @@ describe('backend market data compatibility', () => {
     await expect(
       resolveBoardMarketPrice({ rows: [], valuationContext: null }, 'SiZ6'),
     ).resolves.toMatchObject({ price: 85_020 })
-    expect(getMarketPriceMock).toHaveBeenCalledWith('SiZ6')
+    expect(getMarketPriceMock).toHaveBeenCalledWith('SiZ6', undefined)
   })
 
   it('uses the Rust futures quote and specification without requesting ISS', async () => {
@@ -101,7 +102,7 @@ describe('backend market data compatibility', () => {
     })
 
     await resolveLinearSpecification('SI', 'SiZ6', 'futures')
-    expect(getInstrumentSpecificationMock).toHaveBeenCalledWith('SiZ6', 'futures')
+    expect(getInstrumentSpecificationMock).toHaveBeenCalledWith('SiZ6', 'futures', undefined)
   })
 
   it('does not hide an incomplete Rust specification behind ISS data', async () => {
@@ -120,5 +121,24 @@ describe('backend market data compatibility', () => {
       'Бэкенд прислал неполную спецификацию инструмента SiZ6',
     )
     expect(getInstrumentSpecificationMock).not.toHaveBeenCalled()
+  })
+
+  it('forwards cancellation through the legacy ISS compatibility path', async () => {
+    const options = { signal: new AbortController().signal }
+    getMarketPriceMock.mockResolvedValue({ secid: 'SiZ6', price: 85_020, source: 'LAST' })
+    await resolveBoardMarketPrice({ rows: [], valuationContext: null }, 'SiZ6', options)
+    expect(getMarketPriceMock).toHaveBeenCalledWith('SiZ6', options)
+  })
+
+  it('only treats an omitted portfolio valuation context as a legacy response', () => {
+    expect(valuationMarketPrice(undefined)).toBeNull()
+    expect(() => valuationMarketPrice(null)).toThrow('valuation_context')
+    for (const price of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        valuationMarketPrice({ underlying_secid: 'SiZ6', underlying_price: price }),
+      ).toThrow('valuation_context')
+    }
+    expect(() => valuationMarketPrice({ underlying_price: 85_000 })).toThrow('valuation_context')
+    expect(getMarketPriceMock).not.toHaveBeenCalled()
   })
 })

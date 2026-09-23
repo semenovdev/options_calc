@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Check, LoaderCircle, Search, X } from '@lucide/vue'
 
 import { resolveBoardMarketPrice, resolveFutureMarketPrice } from '@/api/backendMarketData'
 import { getMarketPrice } from '@/api/iss'
+import { isAbortError } from '@/api/http'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type { Asset, Future, InstrumentType, OptionBoardRow, OptionSeries } from '@/types/moex'
@@ -54,6 +55,27 @@ let searchTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 let instrumentRequestId = 0
 let searchRequestId = 0
 let selectingSearchFuture = false
+let searchController: globalThis.AbortController | undefined
+let instrumentController: globalThis.AbortController | undefined
+
+function cancelSearch(): void {
+  globalThis.clearTimeout(searchTimer)
+  searchRequestId += 1
+  searchController?.abort()
+}
+
+function beginInstrumentRequest() {
+  instrumentController?.abort()
+  instrumentController = new globalThis.AbortController()
+  return { requestId: ++instrumentRequestId, options: { signal: instrumentController.signal } }
+}
+
+function cancelRequests(): void {
+  cancelSearch()
+  instrumentRequestId += 1
+  instrumentController?.abort()
+  loading.value = false
+}
 
 const selectedSeries = computed(() =>
   series.value.find((item) => item.optionseries_code === selectedSeriesCode.value),
@@ -136,14 +158,18 @@ const spotDividerIndex = computed(() => {
 })
 
 watch(query, (value) => {
-  globalThis.clearTimeout(searchTimer)
-  const requestId = ++searchRequestId
+  cancelSearch()
+  const requestId = searchRequestId
   if (value.trim().length < 1) {
     assets.value = []
     searchFutures.value = []
+    loading.value = false
     return
   }
   searchTimer = globalThis.setTimeout(async () => {
+    const controller = new globalThis.AbortController()
+    searchController = controller
+    const options = { signal: controller.signal }
     loading.value = true
     error.value = null
     assets.value = []
@@ -151,8 +177,8 @@ watch(query, (value) => {
     try {
       const aliases = futuresSearchAliases(value)
       const searchResults = await Promise.allSettled([
-        optionCalcApi.searchAssets(value.trim()),
-        ...aliases.map((code) => optionCalcApi.searchAssets(code, 'futures')),
+        optionCalcApi.searchAssets(value.trim(), undefined, options),
+        ...aliases.map((code) => optionCalcApi.searchAssets(code, 'futures', options)),
       ])
       const foundAssets = Array.from(
         new Map(
@@ -166,7 +192,7 @@ watch(query, (value) => {
       const futuresResults = await Promise.allSettled(
         foundAssets.map(async (foundAsset) => ({
           asset: foundAsset,
-          futures: await optionCalcApi.getFutures(foundAsset.asset_code),
+          futures: await optionCalcApi.getFutures(foundAsset.asset_code, undefined, options),
         })),
       )
       if (requestId !== searchRequestId) return
@@ -181,9 +207,10 @@ watch(query, (value) => {
           (left.future.expiration_date ?? '').localeCompare(right.future.expiration_date ?? ''),
         )
     } catch (reason) {
+      if (requestId !== searchRequestId || isAbortError(reason)) return
       error.value = reason instanceof Error ? reason.message : 'Ошибка поиска'
     } finally {
-      loading.value = false
+      if (requestId === searchRequestId) loading.value = false
     }
   }, 250)
 })
@@ -191,7 +218,7 @@ watch(query, (value) => {
 watch(selectedSeriesCode, async (code) => {
   if (!asset.value || !code || instrumentType.value !== 'option') return
   const selectedAsset = asset.value
-  const requestId = ++instrumentRequestId
+  const { requestId, options } = beginInstrumentRequest()
   loading.value = true
   error.value = null
   try {
@@ -199,6 +226,7 @@ watch(selectedSeriesCode, async (code) => {
       selectedAsset.asset_code,
       code,
       selectedAsset.asset_type,
+      options,
     )
     if (
       requestId !== instrumentRequestId ||
@@ -212,7 +240,7 @@ watch(selectedSeriesCode, async (code) => {
     const currentSeries = series.value.find((item) => item.optionseries_code === code)
     underlyingPrice.value = null
     const quoteSecid = currentSeries?.futures_code || selectedAsset.asset_code
-    const quote = await resolveBoardMarketPrice(optionBoard, quoteSecid)
+    const quote = await resolveBoardMarketPrice(optionBoard, quoteSecid, options)
     if (
       requestId !== instrumentRequestId ||
       asset.value !== selectedAsset ||
@@ -225,7 +253,7 @@ watch(selectedSeriesCode, async (code) => {
     underlyingPrice.value = quote.price
     await scrollToAtm()
   } catch (reason) {
-    if (requestId !== instrumentRequestId) return
+    if (requestId !== instrumentRequestId || isAbortError(reason)) return
     board.value = []
     underlyingPrice.value = null
     error.value = reason instanceof Error ? reason.message : 'Не удалось загрузить доску опционов'
@@ -254,7 +282,10 @@ watch(quantity, () => {
 })
 
 watch(open, async (isOpen) => {
-  if (!isOpen) return
+  if (!isOpen) {
+    cancelRequests()
+    return
+  }
   reset()
   const strategy = store.activeStrategy
   if (!props.useActiveAsset || !strategy?.positions.length) return
@@ -267,6 +298,7 @@ watch(open, async (isOpen) => {
 })
 
 function reset(): void {
+  cancelRequests()
   step.value = 'asset'
   query.value = ''
   assets.value = []
@@ -295,6 +327,7 @@ function close(): void {
 }
 
 async function chooseAsset(value: Asset): Promise<void> {
+  cancelSearch()
   clearInstrumentSelection()
   asset.value = value
   step.value = 'instrument'
@@ -304,6 +337,7 @@ async function chooseAsset(value: Asset): Promise<void> {
 
 function clearInstrumentSelection(): void {
   instrumentRequestId += 1
+  instrumentController?.abort()
   series.value = []
   selectedSeriesCode.value = ''
   board.value = []
@@ -317,6 +351,7 @@ function clearInstrumentSelection(): void {
 }
 
 async function chooseSearchFuture(result: { asset: Asset; future: Future }): Promise<void> {
+  cancelSearch()
   selectingSearchFuture = true
   try {
     asset.value = result.asset
@@ -334,14 +369,18 @@ async function chooseSearchFuture(result: { asset: Asset; future: Future }): Pro
 
 async function loadInstruments(type: typeof instrumentType.value): Promise<void> {
   if (!asset.value) return
-  const requestId = ++instrumentRequestId
+  const { requestId, options } = beginInstrumentRequest()
   loading.value = true
   error.value = null
   selectedSecid.value = ''
   price.value = undefined
   try {
     if (type === 'option') {
-      const result = await optionCalcApi.getSeries(asset.value.asset_code, asset.value.asset_type)
+      const result = await optionCalcApi.getSeries(
+        asset.value.asset_code,
+        asset.value.asset_type,
+        options,
+      )
       if (requestId !== instrumentRequestId) return
       const activeSeries = result.filter(
         (item) =>
@@ -359,21 +398,22 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
         error.value = `Для ${linkedFutureCode.value} нет активных опционных серий`
       }
     } else if (type === 'futures') {
-      const result = await optionCalcApi.getFutures(asset.value.asset_code)
+      const result = await optionCalcApi.getFutures(asset.value.asset_code, undefined, options)
       if (requestId !== instrumentRequestId) return
       futures.value = lockedFutureCode.value
         ? result.filter((item) => item.futures_code === lockedFutureCode.value)
         : result
     } else {
       selectedSecid.value = asset.value.asset_code
-      const quote = await getMarketPrice(asset.value.asset_code)
+      const quote = await getMarketPrice(asset.value.asset_code, options)
       if (requestId !== instrumentRequestId) return
       price.value = quote.price ?? undefined
     }
   } catch (reason) {
+    if (requestId !== instrumentRequestId || isAbortError(reason)) return
     error.value = reason instanceof Error ? reason.message : 'Не удалось загрузить инструменты'
   } finally {
-    loading.value = false
+    if (requestId === instrumentRequestId) loading.value = false
   }
 }
 
@@ -383,13 +423,26 @@ async function chooseSecid(secid: string): Promise<void> {
     const option = board.value.find((item) => item.secid === secid)
     price.value = option ? (selectedOptionPrice(option) ?? undefined) : undefined
   } else {
+    const { requestId, options } = beginInstrumentRequest()
     const future = futures.value.find((item) => item.futures_code === secid)
     linkedFutureCode.value = secid
-    const quote = future
-      ? await resolveFutureMarketPrice(asset.value!.asset_code, future.futures_code)
-      : await getMarketPrice(secid)
-    if (quote.price === null) throw new Error(`Нет текущей цены инструмента ${secid}`)
-    price.value = quote.price
+    loading.value = true
+    error.value = null
+    price.value = undefined
+    try {
+      const quote = future
+        ? await resolveFutureMarketPrice(asset.value!.asset_code, future.futures_code, options)
+        : await getMarketPrice(secid, options)
+      if (requestId !== instrumentRequestId) return
+      if (quote.price === null) throw new Error(`Нет текущей цены инструмента ${secid}`)
+      price.value = quote.price
+    } catch (reason) {
+      if (requestId !== instrumentRequestId || isAbortError(reason)) return
+      error.value =
+        reason instanceof Error ? reason.message : 'Не удалось получить цену инструмента'
+    } finally {
+      if (requestId === instrumentRequestId) loading.value = false
+    }
   }
 }
 
@@ -480,6 +533,8 @@ function finish(): void {
   close()
   void store.calculate()
 }
+
+onBeforeUnmount(cancelRequests)
 </script>
 
 <template>

@@ -44,7 +44,10 @@ onMounted(() => {
   refreshTimer = globalThis.setInterval(refreshActiveStrategy, appConfig.autoRefreshIntervalMs)
 })
 
-onBeforeUnmount(() => globalThis.clearInterval(refreshTimer))
+onBeforeUnmount(() => {
+  globalThis.clearInterval(refreshTimer)
+  store.resetCalculation()
+})
 </script>
 
 <template>
