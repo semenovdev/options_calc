@@ -264,42 +264,49 @@ describe('lazy portfolio calculations', () => {
     },
   )
 
-  it('publishes P&L before bounded background scenario Greeks and computes their totals', async () => {
-    const store = populatedStore()
-    store.activeStrategy!.volatilityShift = 1
-    const pending = new Map<IndicatorType, ReturnType<typeof deferred<IndicatorGraph>>>()
-    let active = 0
-    let peak = 0
-    getGraph.mockImplementation((indicator) => {
-      if (indicator === 'profit_and_loss')
-        return Promise.resolve({ ...graph(), on_what_if: graph(20).now })
-      const task = deferred<IndicatorGraph>()
-      pending.set(indicator, task)
-      active += 1
-      peak = Math.max(peak, active)
-      return task.promise.finally(() => {
-        active -= 1
-      })
-    })
-    const run = store.calculate()
-    await flushPromises()
-    expect(store.calculation.graphs.profit_and_loss).toBeDefined()
-    expect(store.calculation.loading).toBe(false)
-    expect([...pending.keys()]).toEqual(['delta', 'gamma'])
-    const values: Record<string, number> = { delta: 1, gamma: 2, vega: 3, theta: 4, rho: 5 }
-    for (const batch of [['delta', 'gamma'], ['vega', 'theta'], ['rho']] as IndicatorType[][]) {
-      for (const indicator of batch) {
-        expect(pending.has(indicator)).toBe(true)
-        pending.get(indicator)!.resolve({ ...graph(), on_what_if: graph(values[indicator]).now })
+  it.each(['IV shift', 'saved date'])(
+    'keeps current totals after late scenario graphs: %s',
+    async (scenario) => {
+      const store = populatedStore()
+      if (scenario === 'IV shift') store.activeStrategy!.volatilityShift = 1
+      else store.activeStrategy!.calculationDate = '2026-09-17'
+      const current = portfolio()
+      current.total = {
+        profit_and_loss: 10,
+        profit_and_loss_rub: 30,
+        delta: 0.5,
+        gamma: 0.002,
+        vega: 8,
+        theta: -3,
+        rho: 1,
       }
+      calculate.mockResolvedValue(current)
+      const pending = deferred<IndicatorGraph>()
+      getGraph.mockImplementation((indicator) => {
+        if (indicator === 'profit_and_loss') return pending.promise
+        return Promise.resolve({ ...graph(), on_what_if: graph(99).now })
+      })
+      const run = store.calculate()
       await flushPromises()
-    }
-    await run
-    expect(peak).toBe(2)
-    expect(store.calculation.portfolio?.total).toMatchObject({
-      ...values,
-      profit_and_loss: 20,
-      profit_and_loss_rub: 20,
-    })
-  })
+      expect(store.calculation.portfolio?.total).toEqual(current.total)
+      expect(store.calculation.loading).toBe(false)
+      pending.resolve({ ...graph(), on_what_if: graph(20).now })
+      await run
+      expect(store.calculation.portfolio?.total).toEqual(current.total)
+      expect(store.calculation.graphs.profit_and_loss?.now[1]?.value).toBe(
+        current.total.profit_and_loss,
+      )
+      expect(store.calculation.graphs.profit_and_loss?.on_what_if?.[1]?.value).toBe(20)
+      expect(calculate.mock.calls[0]![0].what_if).toBeUndefined()
+      expect(getGraph.mock.calls[0]![1].what_if).toBeDefined()
+      expect(getGraph).toHaveBeenCalledTimes(1)
+      for (const indicator of ['delta', 'gamma', 'vega', 'theta', 'rho'] as IndicatorType[]) {
+        store.selectedIndicator = indicator
+        await flushPromises()
+        await store.loadGraph(indicator)
+        expect(store.calculation.graphs[indicator]?.on_what_if?.[1]?.value).toBe(99)
+        expect(store.calculation.portfolio?.total).toEqual(current.total)
+      }
+    },
+  )
 })

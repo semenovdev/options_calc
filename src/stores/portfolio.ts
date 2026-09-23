@@ -13,7 +13,6 @@ import type {
   IndicatorGraph,
   IndicatorType,
   PortfolioRequest,
-  PortfolioTotals,
 } from '@/types/moex'
 import type { CalculationState, Position, Strategy } from '@/types/portfolio'
 import { todayMoscow } from '@/utils/format'
@@ -23,11 +22,9 @@ import {
   linearPnl,
   type LinearPosition,
 } from '@/utils/linearPnl'
-import { indicatorValueAt } from '@/utils/options'
 import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
 
 const STORAGE_KEY = 'moex-options-workbench:v1'
-const indicators: IndicatorType[] = ['profit_and_loss', 'delta', 'gamma', 'vega', 'theta', 'rho']
 const indicatorLabels: Record<IndicatorType, string> = {
   profit_and_loss: 'PnL',
   delta: 'Delta',
@@ -99,8 +96,6 @@ interface PreparedCalculation {
 interface CalculationRun {
   controller: AbortController
   payload: PortfolioRequest
-  hasScenario: boolean
-  scenarioTotals: PortfolioTotals
   ready: Promise<PreparedCalculation>
   graphs: Map<IndicatorType, Promise<void>>
 }
@@ -342,13 +337,6 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       const { linear, spot } = contextResult.value
       const graph = addLinearPositionsToGraph(graphResult.value, linear, indicator, spot)
       calculation.graphs[indicator] = graph
-      if (run.hasScenario && graph.on_what_if) {
-        const value = indicatorValueAt(graph.on_what_if, spot)
-        if (value !== null) {
-          run.scenarioTotals[indicator] = value
-          if (indicator === 'profit_and_loss') run.scenarioTotals.profit_and_loss_rub = value
-        }
-      }
     })().finally(() => {
       run.graphs.delete(indicator)
       if (currentRun === run) calculation.graphLoading[indicator] = false
@@ -374,8 +362,6 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         strategy,
         selectedPositions.filter((position) => position.type === 'option'),
       ),
-      hasScenario: Boolean(strategy.volatilityShift) || strategy.calculationDate !== todayMoscow(),
-      scenarioTotals: {},
       ready: prepareCalculation(strategy, selectedPositions, controller.signal),
       graphs: new Map(),
     }
@@ -398,19 +384,6 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       if (currentRun === run) calculation.loading = false
     }
     await visibleGraph
-    // Scenario totals need every Greek; ordinary profile browsing only loads the selected graph.
-    if (run.hasScenario) {
-      const remaining = indicators.filter((indicator) => !calculation.graphs[indicator])
-      for (let index = 0; index < remaining.length; index += 2) {
-        if (currentRun !== run || controller.signal.aborted) break
-        await Promise.all(
-          remaining.slice(index, index + 2).map((indicator) => loadGraph(indicator, run)),
-        )
-      }
-      if (currentRun === run && calculation.portfolio) {
-        calculation.portfolio.total = { ...calculation.portfolio.total, ...run.scenarioTotals }
-      }
-    }
   }
 
   watch([selectedIndicator, profileVisible], ([indicator, visible]) => {
