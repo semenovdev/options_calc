@@ -722,51 +722,16 @@ th {
   border: 1px solid #212832;
   border-radius: 5px;
 }
-.greeks-grid small,
-.hedge-card small {
+.greeks-grid small {
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
   font-size: 9px;
 }
-.greeks-grid strong,
-.hedge-card strong {
+.greeks-grid strong {
   font:
     600 11px 'IBM Plex Mono',
     monospace;
-}
-.hedge-card {
-  display: grid;
-  grid-template-columns: 30px 1fr auto;
-  align-items: center;
-  gap: 9px;
-  min-height: 53px;
-  padding: 7px;
-  margin-bottom: 6px;
-  background: var(--panel-2);
-  border: 1px solid #212832;
-  border-radius: 5px;
-}
-.hedge-icon {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border-radius: 4px;
-}
-.hedge-icon.delta {
-  color: var(--blue);
-  background: rgba(107, 152, 250, 0.1);
-}
-.hedge-icon.vega {
-  color: var(--violet);
-  background: rgba(213, 146, 255, 0.1);
-}
-.hedge-note {
-  margin: 8px 1px 0;
-  color: var(--faint);
-  font-size: 9px;
-  line-height: 1.5;
 }
 .field-label {
   display: flex;
