@@ -9,6 +9,12 @@ function baseUrl(value: string | undefined, fallback: string): string {
 }
 
 export const appConfig = {
+  backend:
+    import.meta.env.VITE_OPTION_CALC_BACKEND ??
+    (import.meta.env.VITE_OPTION_CALC_PROXY_TARGET &&
+    !import.meta.env.VITE_OPTION_CALC_PROXY_TARGET.includes('iss.moex.com')
+      ? 'rust'
+      : 'moex'),
   optionCalcBaseUrl: baseUrl(import.meta.env.VITE_OPTION_CALC_BASE_URL, '/moex-option-calc'),
   autoRefreshIntervalMs: positiveNumber(import.meta.env.VITE_AUTO_REFRESH_INTERVAL_MS, 60_000),
 } as const

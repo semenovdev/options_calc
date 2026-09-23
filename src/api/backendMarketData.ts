@@ -1,5 +1,6 @@
 import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
 import { optionCalcApi, type ApiRequestOptions } from '@/api/optionCalc'
+import { appConfig } from '@/config'
 import type {
   AssetType,
   Future,
@@ -63,7 +64,21 @@ export async function resolveBoardMarketPrice(
   fallbackSecid: string,
   options?: ApiRequestOptions,
 ): Promise<MarketPrice> {
-  return boardMarketPrice(board) ?? getMarketPrice(fallbackSecid, options)
+  const market = boardMarketPrice(board)
+  if (market) return market
+  if (appConfig.backend === 'rust') throw new Error('Бэкенд не прислал valuation_context доски')
+  return getMarketPrice(fallbackSecid, options)
+}
+
+export async function resolveInstrumentMarketPrice(
+  secid: string,
+  options?: ApiRequestOptions,
+): Promise<MarketPrice> {
+  if (appConfig.backend !== 'rust') return getMarketPrice(secid, options)
+  const instrument = await optionCalcApi.getInstrument(secid, options)
+  const market = futureMarketPrice({ ...instrument, futures_code: instrument.secid })
+  if (!market) throw new Error(`Бэкенд не прислал текущую цену инструмента ${secid}`)
+  return market
 }
 
 export async function resolveFutureMarketPrice(
@@ -74,7 +89,11 @@ export async function resolveFutureMarketPrice(
   const futures = await optionCalcApi.getFutures(assetCode, undefined, options)
   const future = futures.find((item) => item.futures_code === secid)
   if (!future) throw new Error(`Бэкенд не вернул фьючерс ${secid}`)
-  return futureMarketPrice(future) ?? getMarketPrice(secid, options)
+  const market = futureMarketPrice(future)
+  if (market) return market
+  if (appConfig.backend === 'rust')
+    throw new Error(`Бэкенд не прислал текущую цену инструмента ${secid}`)
+  return getMarketPrice(secid, options)
 }
 
 export async function resolveLinearSpecification(
@@ -83,9 +102,17 @@ export async function resolveLinearSpecification(
   type: 'futures' | 'share',
   options?: ApiRequestOptions,
 ): Promise<InstrumentSpecification> {
-  if (type === 'share') return getInstrumentSpecification(secid, type, options)
+  if (type === 'share' && appConfig.backend !== 'rust')
+    return getInstrumentSpecification(secid, type, options)
 
-  const futures = await optionCalcApi.getFutures(assetCode, undefined, options)
+  const futures =
+    type === 'share'
+      ? [
+          await optionCalcApi
+            .getInstrument(secid, options)
+            .then((item) => ({ ...item, futures_code: item.secid })),
+        ]
+      : await optionCalcApi.getFutures(assetCode, undefined, options)
   const future = futures.find((item) => item.futures_code === secid)
   if (!future) throw new Error(`Бэкенд не вернул фьючерс ${secid}`)
   const market = futureMarketPrice(future)
@@ -93,7 +120,8 @@ export async function resolveLinearSpecification(
     future.min_step !== undefined ||
     future.step_price !== undefined ||
     future.lot_size !== undefined
-  if (!hasSpecificationFields) return getInstrumentSpecification(secid, type, options)
+  if (!hasSpecificationFields && appConfig.backend !== 'rust')
+    return getInstrumentSpecification(secid, type, options)
   if (
     !market ||
     !positive(future.min_step) ||
@@ -129,5 +157,5 @@ export async function resolveUnderlyingMarketPrice(
     return resolveBoardMarketPrice(board, secid, options)
   }
   if (assetType === 'futures') return resolveFutureMarketPrice(assetCode, secid, options)
-  return getMarketPrice(secid, options)
+  return resolveInstrumentMarketPrice(secid, options)
 }

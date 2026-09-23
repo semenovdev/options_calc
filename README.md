@@ -31,6 +31,7 @@ VITE_OPTION_CALC_BASE_URL=/moex-option-calc
 
 # Локальный Rust backend
 VITE_OPTION_CALC_BASE_URL=http://127.0.0.1:3000
+VITE_OPTION_CALC_BACKEND=rust
 ```
 
 После изменения `.env` перезапустите Vite. Завершающий `/` необязателен. При прямом
@@ -43,6 +44,7 @@ Vite продолжает проксировать `/moex-option-calc` на `htt
 ```sh
 VITE_OPTION_CALC_BASE_URL=/moex-option-calc
 VITE_OPTION_CALC_PROXY_TARGET=http://127.0.0.1:8080
+VITE_OPTION_CALC_BACKEND=rust
 ```
 
 ## Загрузка данных

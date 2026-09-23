@@ -31,6 +31,12 @@ function calculatePortfolio(
 }
 
 export const optionCalcApi = {
+  getInstrument(secid: string, options?: ApiRequestOptions) {
+    return requestSharedJson<Omit<Future, 'futures_code'> & { secid: string }>(
+      `${appConfig.optionCalcBaseUrl}/instruments/${encodeURIComponent(secid)}`,
+      { ...options, retries: 2 },
+    )
+  },
   searchAssets(query: string, assetType?: AssetType, options?: ApiRequestOptions) {
     return requestSharedJson<Asset[]>(
       `${appConfig.optionCalcBaseUrl}/assets${queryString({ query, asset_type: assetType })}`,

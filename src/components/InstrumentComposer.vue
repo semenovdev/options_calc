@@ -2,8 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { Check, LoaderCircle, Search, X } from '@lucide/vue'
 
-import { resolveBoardMarketPrice, resolveFutureMarketPrice } from '@/api/backendMarketData'
-import { getMarketPrice } from '@/api/iss'
+import {
+  resolveBoardMarketPrice,
+  resolveFutureMarketPrice,
+  resolveInstrumentMarketPrice,
+} from '@/api/backendMarketData'
 import { isAbortError } from '@/api/http'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
@@ -190,10 +193,16 @@ watch(query, (value) => {
       if (requestId !== searchRequestId) return
       assets.value = foundAssets
       const futuresResults = await Promise.allSettled(
-        foundAssets.map(async (foundAsset) => ({
-          asset: foundAsset,
-          futures: await optionCalcApi.getFutures(foundAsset.asset_code, undefined, options),
-        })),
+        foundAssets
+          .filter(
+            (item) =>
+              item.asset_type === 'futures' &&
+              [value.trim().toUpperCase(), ...aliases].includes(item.asset_code.toUpperCase()),
+          )
+          .map(async (foundAsset) => ({
+            asset: foundAsset,
+            futures: await optionCalcApi.getFutures(foundAsset.asset_code, undefined, options),
+          })),
       )
       if (requestId !== searchRequestId) return
       searchFutures.value = futuresResults
@@ -405,7 +414,7 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
         : result
     } else {
       selectedSecid.value = asset.value.asset_code
-      const quote = await getMarketPrice(asset.value.asset_code, options)
+      const quote = await resolveInstrumentMarketPrice(asset.value.asset_code, options)
       if (requestId !== instrumentRequestId) return
       price.value = quote.price ?? undefined
     }
@@ -432,7 +441,7 @@ async function chooseSecid(secid: string): Promise<void> {
     try {
       const quote = future
         ? await resolveFutureMarketPrice(asset.value!.asset_code, future.futures_code, options)
-        : await getMarketPrice(secid, options)
+        : await resolveInstrumentMarketPrice(secid, options)
       if (requestId !== instrumentRequestId) return
       if (quote.price === null) throw new Error(`Нет текущей цены инструмента ${secid}`)
       price.value = quote.price

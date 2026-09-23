@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
 import type { OptionBoard } from '@/types/moex'
+import { appConfig } from '@/config'
 
 import {
   resolveBoardMarketPrice,
   resolveFutureMarketPrice,
   resolveLinearSpecification,
+  resolveInstrumentMarketPrice,
   valuationMarketPrice,
 } from './backendMarketData'
 
@@ -15,11 +17,13 @@ vi.mock('@/api/iss', () => ({
   getInstrumentSpecification: vi.fn(),
   getMarketPrice: vi.fn(),
 }))
+vi.mock('@/config', () => ({ appConfig: { backend: 'moex' } }))
 
 vi.mock('@/api/optionCalc', () => ({
   optionCalcApi: {
     getFutures: vi.fn(),
     getOptionBoard: vi.fn(),
+    getInstrument: vi.fn(),
   },
 }))
 
@@ -27,9 +31,42 @@ const getMarketPriceMock = vi.mocked(getMarketPrice)
 const getInstrumentSpecificationMock = vi.mocked(getInstrumentSpecification)
 const getFuturesMock = vi.mocked(optionCalcApi.getFutures)
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  Object.assign(appConfig, { backend: 'moex' })
+})
 
 describe('backend market data compatibility', () => {
+  it('gets share prices and specifications only from Rust', async () => {
+    Object.assign(appConfig, { backend: 'rust' })
+    vi.mocked(optionCalcApi.getInstrument).mockResolvedValue({
+      secid: 'SBER',
+      price: 278.145,
+      price_source: 'midpoint',
+      min_step: 0.01,
+      step_price: 0.1,
+      lot_size: 10,
+    })
+    await expect(resolveInstrumentMarketPrice('SBER')).resolves.toMatchObject({ price: 278.145 })
+    await expect(resolveLinearSpecification('SBER', 'SBER', 'share')).resolves.toMatchObject({
+      minStep: 0.01,
+      stepPrice: 0.1,
+      lotSize: 10,
+    })
+    expect(getMarketPriceMock).not.toHaveBeenCalled()
+    expect(getInstrumentSpecificationMock).not.toHaveBeenCalled()
+  })
+  it('does not bypass a failed Rust share request with ISS', async () => {
+    Object.assign(appConfig, { backend: 'rust' })
+    vi.mocked(optionCalcApi.getInstrument).mockRejectedValue(new Error('unavailable'))
+    await expect(resolveInstrumentMarketPrice('SBER')).rejects.toThrow('unavailable')
+    expect(getMarketPriceMock).not.toHaveBeenCalled()
+  })
+  it('retains the official MOEX share compatibility path', async () => {
+    await resolveLinearSpecification('SBER', 'SBER', 'share')
+    expect(getInstrumentSpecificationMock).toHaveBeenCalledWith('SBER', 'share', undefined)
+    expect(optionCalcApi.getInstrument).not.toHaveBeenCalled()
+  })
   it('uses the Rust valuation context without requesting ISS', async () => {
     const board: OptionBoard = {
       rows: [],

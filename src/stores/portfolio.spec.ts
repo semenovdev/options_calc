@@ -23,6 +23,7 @@ vi.mock('@/api/optionCalc', () => ({
   },
 }))
 vi.mock('@/api/iss', () => ({ getMarketPrice: vi.fn(), getInstrumentSpecification: vi.fn() }))
+vi.mock('@/config', () => ({ appConfig: { backend: 'moex' } }))
 
 const calculate = vi.mocked(optionCalcApi.calculatePortfolio)
 const getGraph = vi.mocked(optionCalcApi.getPortfolioGraph)

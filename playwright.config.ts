@@ -48,6 +48,7 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 30_000,
       env: {
+        VITE_OPTION_CALC_BACKEND: backend,
         VITE_OPTION_CALC_BASE_URL: '/moex-option-calc',
         VITE_OPTION_CALC_PROXY_TARGET: apiTarget,
         VITE_AUTO_REFRESH_INTERVAL_MS: '3600000',

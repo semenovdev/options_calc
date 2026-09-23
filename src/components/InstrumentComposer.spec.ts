@@ -62,6 +62,12 @@ async function query(value: string) {
 }
 
 describe('composer cancellation', () => {
+  it('does not fetch futures for every result of a broad search', async () => {
+    search.mockResolvedValue([asset('SI'), asset('SBRF'), asset('SNGP')])
+    await query('S')
+    expect(wrapper!.findAll('.result-code')).toHaveLength(3)
+    expect(futures).not.toHaveBeenCalled()
+  })
   it('cancels superseded searches and ignores their late results', async () => {
     const oldSearch = deferred<Asset[]>()
     search.mockReturnValueOnce(oldSearch.promise).mockResolvedValueOnce([asset('RTS')])
