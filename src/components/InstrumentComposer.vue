@@ -630,7 +630,10 @@ onBeforeUnmount(cancelRequests)
               </button>
               <button
                 :class="{ active: instrumentType === 'share' }"
-                :disabled="asset?.asset_type !== 'share'"
+                :disabled="
+                  asset?.asset_type !== 'share' ||
+                  (!!asset.asset_subtype && asset.asset_subtype !== 'share')
+                "
                 @click="instrumentType = 'share'"
               >
                 Акция

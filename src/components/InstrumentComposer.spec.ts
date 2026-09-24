@@ -63,6 +63,24 @@ async function query(value: string) {
 }
 
 describe('composer cancellation', () => {
+  it.each(['index', 'commodity'] as const)(
+    'does not offer a %s underlying as a share position',
+    async (subtype) => {
+      search.mockResolvedValue([
+        {
+          asset_code: 'DIRECT',
+          title: 'Direct underlying',
+          asset_type: 'share',
+          asset_subtype: subtype,
+        },
+      ])
+      await query('DIRECT')
+      await wrapper!.get('.asset-results button').trigger('click')
+      await flushPromises()
+      const button = wrapper!.findAll('button').find((button) => button.text() === 'Акция')!
+      expect(button.attributes('disabled')).toBeDefined()
+    },
+  )
   it('does not label wide spreads and one-sided offers as theoretical-only', async () => {
     search.mockResolvedValue([asset('GAZR')])
     vi.mocked(optionCalcApi.getSeries).mockResolvedValue([

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 
 import { optionCalcApi } from '@/api/optionCalc'
+import { MoexApiError } from '@/api/http'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type { OptionSeries, VolatilityPoint } from '@/types/moex'
 
@@ -70,6 +71,7 @@ beforeEach(() => {
     rows: [{ secid: 'SI-CALL', strike: 85_000, bid: 100, offer: 102, numtrades: 4 }],
   })
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 afterEach(() => {
   wrapper?.unmount()
@@ -92,6 +94,40 @@ async function tab(label: string) {
 }
 
 describe('workspace request boundaries', () => {
+  it.each(['rust', 'legacy'])('shows a warning for insufficient %s smile data', async (backend) => {
+    if (backend === 'rust')
+      getSmile.mockRejectedValueOnce(
+        new MoexApiError('sparse wings', 503, {
+          code: 'LIVE_DATA_UNAVAILABLE',
+          details: { reason: 'INSUFFICIENT_VOLATILITY_DATA' },
+        }),
+      )
+    else getSmile.mockResolvedValueOnce([])
+    render()
+    await tab('Улыбка IV')
+    expect(wrapper!.get('[role="status"]').text()).toContain('Недостаточно данных')
+    expect(wrapper!.find('[data-testid="smile-chart"]').exists()).toBe(false)
+    expect(console.error).not.toHaveBeenCalled()
+    expect(console.warn).toHaveBeenCalled()
+    await wrapper!.get('.series-select').setValue('SI-B')
+    await flushPromises()
+    expect(wrapper!.find('.smile-warning').exists()).toBe(false)
+    expect(wrapper!.find('[data-testid="smile-chart"]').exists()).toBe(true)
+  })
+
+  it('does not turn provider or calculation errors into a sparse-data warning', async () => {
+    getSmile.mockRejectedValueOnce(
+      new MoexApiError('invalid curve', 503, {
+        code: 'LIVE_DATA_UNAVAILABLE',
+        details: {},
+      }),
+    )
+    render()
+    await tab('Улыбка IV')
+    expect(wrapper!.find('.smile-warning').exists()).toBe(false)
+    expect(console.error).toHaveBeenCalled()
+    expect(console.warn).not.toHaveBeenCalled()
+  })
   it('makes no catalog, board or smile requests on the default profile tab', async () => {
     render()
     await flushPromises()

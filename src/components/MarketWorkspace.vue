@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { EChartsOption } from 'echarts'
-import { BarChart3, Droplets, LineChart as LineChartIcon, LoaderCircle } from '@lucide/vue'
+import {
+  BarChart3,
+  Droplets,
+  LineChart as LineChartIcon,
+  LoaderCircle,
+  TriangleAlert,
+} from '@lucide/vue'
 
-import { isAbortError } from '@/api/http'
+import { isAbortError, MoexApiError } from '@/api/http'
 import { optionCalcApi } from '@/api/optionCalc'
 import { usePortfolioStore } from '@/stores/portfolio'
 import type {
@@ -41,6 +47,7 @@ const series = ref<OptionSeries[]>([])
 const selectedSeriesCode = ref('')
 const board = ref<OptionBoardRow[]>([])
 const smile = ref<VolatilityPoint[]>([])
+const smileWarning = ref(false)
 const smileMode = ref<string | null>(null)
 const smileSource = computed(() =>
   smileMode.value === 'market'
@@ -368,6 +375,7 @@ async function loadSeriesData(): Promise<void> {
   marketError.value = null
   board.value = []
   smile.value = []
+  smileWarning.value = false
   smileMode.value = null
   try {
     const options = { signal: controller.signal }
@@ -384,12 +392,22 @@ async function loadSeriesData(): Promise<void> {
         },
       )
       if (controller.signal.aborted || dataController !== controller) return
-      if (!result.length) throw new Error('backend returned an empty graph')
       const invalidIndex = result.findIndex(
-        (point) => !Number.isFinite(point.strike) || !Number.isFinite(point.volatility),
+        (point) =>
+          !Number.isFinite(point.strike) ||
+          point.strike <= 0 ||
+          !Number.isFinite(point.volatility) ||
+          point.volatility <= 0,
       )
       if (invalidIndex >= 0)
         throw new Error(`backend returned an invalid point at index ${invalidIndex}`)
+      if (result.length < 2) {
+        smileWarning.value = true
+        globalThis.console.warn(
+          '[MOEX Options] IV Smile chart warning: insufficient volatility points',
+        )
+        return
+      }
       smile.value = result
     } else {
       const result = await optionCalcApi.getOptionBoard(
@@ -405,7 +423,19 @@ async function loadSeriesData(): Promise<void> {
   } catch (reason) {
     if (controller.signal.aborted || dataController !== controller || isAbortError(reason)) return
     if (tab === 'smile') {
-      globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
+      const body = reason instanceof MoexApiError ? reason.details : null
+      const details = body && typeof body === 'object' && 'details' in body ? body.details : null
+      if (
+        details &&
+        typeof details === 'object' &&
+        'reason' in details &&
+        details.reason === 'INSUFFICIENT_VOLATILITY_DATA'
+      ) {
+        smileWarning.value = true
+        globalThis.console.warn('[MOEX Options] IV Smile chart warning:', reason)
+      } else {
+        globalThis.console.error('[MOEX Options] IV Smile chart error:', reason)
+      }
     } else {
       globalThis.console.error('[MOEX Options] Option board error:', reason)
       marketError.value = reason instanceof Error ? reason.message : 'Ошибка загрузки серии'
@@ -440,6 +470,7 @@ watch(
     selectedSeriesCode.value = ''
     board.value = []
     smile.value = []
+    smileWarning.value = false
     marketError.value = null
     loadingMarket.value = false
     void loadMarketData()
@@ -544,6 +575,11 @@ onBeforeUnmount(() => {
       <div v-if="smile.length" class="smile-source">{{ smileSource }}</div>
       <div v-if="smile.length" class="chart-frame" data-testid="smile-chart">
         <VChart :option="smileOption" autoresize />
+      </div>
+      <div v-else-if="smileWarning" class="chart-empty smile-warning" role="status">
+        <TriangleAlert :size="28" />
+        <strong>Недостаточно данных для улыбки волатильности</strong>
+        <span>В выбранной серии недостаточно опорных точек.</span>
       </div>
       <div v-else class="chart-empty">
         <BarChart3 :size="28" /><strong>Нет данных по улыбке</strong
