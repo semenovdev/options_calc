@@ -21,9 +21,9 @@ const store = usePortfolioStore()
         :class="{ active: strategy.id === store.activeId }"
         @click="store.selectStrategy(strategy.id)"
       >
-        <span v-if="strategy.assetCode" class="strategy-code">{{ strategy.assetCode }}</span>
         <span class="strategy-meta">
-          <strong>{{ strategy.name }}</strong>
+          <span v-if="strategy.assetCode" class="strategy-code">{{ strategy.assetCode }}</span>
+          <strong :title="strategy.name">{{ strategy.name }}</strong>
           <small>{{ strategy.positions.length }} позиций</small>
         </span>
         <span

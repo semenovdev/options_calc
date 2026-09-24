@@ -152,7 +152,7 @@ select:focus-visible {
   width: 100%;
   min-height: 58px;
   display: grid;
-  grid-template-columns: 38px 1fr 22px;
+  grid-template-columns: minmax(0, 1fr) 22px;
   align-items: center;
   gap: 9px;
   padding: 8px;
@@ -182,9 +182,7 @@ select:focus-visible {
     600 11px 'IBM Plex Mono',
     monospace;
   color: var(--green);
-  width: 38px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .strategy-meta {
   display: flex;
@@ -201,6 +199,7 @@ select:focus-visible {
 .strategy-meta small {
   color: var(--muted);
   font-size: 10px;
+  white-space: nowrap;
 }
 .delete-strategy {
   opacity: 0;
@@ -208,7 +207,8 @@ select:focus-visible {
   display: grid;
   place-items: center;
 }
-.strategy-item:hover .delete-strategy {
+.strategy-item:hover .delete-strategy,
+.strategy-item:focus-within .delete-strategy {
   opacity: 1;
 }
 

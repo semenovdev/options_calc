@@ -96,6 +96,25 @@ afterEach(() => {
 })
 
 describe('lazy portfolio calculations', () => {
+  it('prepends new strategies, selects them and persists their order', async () => {
+    const store = usePortfolioStore()
+    const firstId = store.activeId
+    store.addStrategy()
+    const secondId = store.activeId
+    store.addStrategy()
+    const thirdId = store.activeId
+    expect(store.strategies.map((strategy) => strategy.id)).toEqual([thirdId, secondId, firstId])
+    expect(store.activeStrategy?.id).toBe(store.strategies[0]?.id)
+    await nextTick()
+    const saved = JSON.parse(localStorage.getItem('moex-options-workbench:v1')!)
+    expect(saved.strategies.map((strategy: { id: string }) => strategy.id)).toEqual([
+      thirdId,
+      secondId,
+      firstId,
+    ])
+    expect(saved.activeId).toBe(thirdId)
+  })
+
   it.each([
     ['GLDRUB_TOM', 'commodity', 1],
     ['SLVRUB_TOM', 'commodity', 100],

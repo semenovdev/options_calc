@@ -156,7 +156,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   function addStrategy(): void {
     const strategy = initialStrategy()
     strategy.name = `Стратегия ${strategies.value.length + 1}`
-    strategies.value.push(strategy)
+    strategies.value.unshift(strategy)
     selectStrategy(strategy.id)
   }
 
