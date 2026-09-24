@@ -325,7 +325,7 @@ function liquidityClass(row: OptionBoardRow): string {
 
 async function loadMarketData(): Promise<void> {
   const strategy = store.activeStrategy
-  if (!strategy || activeTab.value === 'profile') return
+  if (!strategy?.assetCode || !strategy.assetType || activeTab.value === 'profile') return
   seriesController?.abort()
   const controller = new globalThis.AbortController()
   seriesController = controller
@@ -368,7 +368,7 @@ async function loadSeriesData(): Promise<void> {
   dataController = undefined
   const tab = activeTab.value
   const seriesCode = selectedSeriesCode.value
-  if (!strategy || !seriesCode || tab === 'profile') return
+  if (!strategy?.assetCode || !strategy.assetType || !seriesCode || tab === 'profile') return
   const controller = new globalThis.AbortController()
   dataController = controller
   loadingMarket.value = true

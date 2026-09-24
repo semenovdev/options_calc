@@ -1,4 +1,4 @@
-import type { InstrumentSpecification, InstrumentType, MarketPrice } from '@/types/moex'
+import type { InstrumentSpecification, LinearInstrumentType, MarketPrice } from '@/types/moex'
 
 import type { ApiRequestOptions } from './optionCalc'
 import { queryString, requestSharedJson } from './http'
@@ -104,10 +104,15 @@ export async function getMarketPrice(
 
 export async function getInstrumentSpecification(
   secid: string,
-  type: Extract<InstrumentType, 'futures' | 'share'>,
+  type: LinearInstrumentType,
   options?: ApiRequestOptions,
 ): Promise<InstrumentSpecification> {
-  const market = type === 'futures' ? 'futures/markets/forts' : 'stock/markets/shares'
+  const market =
+    type === 'futures'
+      ? 'futures/markets/forts'
+      : type === 'share'
+        ? 'stock/markets/shares'
+        : 'currency/markets/selt/boards/CETS'
   const columns = 'SECID,BID,OFFER,LAST,UPDATETIME'
   const response = await requestSharedJson<IssSecurityResponse>(
     `/moex-iss/engines/${market}/securities/${encodeURIComponent(secid)}.json${queryString({
@@ -122,9 +127,14 @@ export async function getInstrumentSpecification(
   const securityRow = rows(response.securities)[0]
   if (!marketRow || !securityRow) throw new Error(`Нет данных по инструменту ${secid}`)
   const marketPrice = currentPrice(marketRow)
-  const minStep = finiteNumber(securityRow.MINSTEP)
-  const stepPrice = finiteNumber(securityRow.STEPPRICE)
-  const lotSize = finiteNumber(securityRow.LOTSIZE)
+  const minStep = positiveNumber(securityRow.MINSTEP)
+  const lotSize = positiveNumber(securityRow.LOTSIZE)
+  const stepPrice =
+    type === 'futures'
+      ? positiveNumber(securityRow.STEPPRICE)
+      : minStep !== null && lotSize !== null
+        ? minStep * lotSize
+        : null
   if (marketPrice.price === null || marketPrice.source === 'unavailable') {
     throw new Error(`Нет текущей цены инструмента ${secid}`)
   }

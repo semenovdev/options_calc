@@ -63,6 +63,74 @@ async function query(value: string) {
 }
 
 describe('composer cancellation', () => {
+  it('offers direct IMOEX options and separately finds the MIX index future', async () => {
+    search.mockImplementation(async (needle) =>
+      needle === 'MIX'
+        ? [{ asset_code: 'MIX', title: 'MIX', asset_type: 'futures', asset_subtype: 'commodity' }]
+        : [{ asset_code: 'IMOEX', title: 'IMOEX', asset_type: 'share', asset_subtype: 'index' }],
+    )
+    futures.mockResolvedValue([{ futures_code: 'MXZ6', expiration_date: '2099-12-17' }])
+    vi.mocked(optionCalcApi.getSeries).mockResolvedValue([
+      {
+        optionseries_code: 'IMOEX-share-IMOEX-2026-09-30',
+        asset_code: 'IMOEX',
+        asset_type: 'share',
+        futures_code: 'IMOEX',
+        expiration_date: '2099-09-30',
+      },
+    ])
+    vi.mocked(optionCalcApi.getOptionBoard).mockResolvedValue({
+      valuationContext: {
+        mode: 'market',
+        underlying_price: 2312,
+        underlying_secid: 'IMOEX',
+      },
+      rows: [],
+    })
+    await query('IMOEX')
+    expect(wrapper!.get('.asset-results').text()).toContain('Индекс')
+    expect(wrapper!.get('.asset-results').text()).toContain('MIX')
+    expect(wrapper!.get('.asset-results').text()).toContain('Фьючерс')
+    expect(search).toHaveBeenCalledWith('MIX', 'futures', expect.anything())
+    expect(futures).toHaveBeenCalledWith('MIX', undefined, expect.anything())
+    expect(futures).not.toHaveBeenCalledWith('IMOEX', undefined, expect.anything())
+    await wrapper!
+      .findAll('.asset-results button')
+      .find((button) => button.text().includes('IMOEX'))!
+      .trigger('click')
+    await flushPromises()
+    expect(optionCalcApi.getSeries).toHaveBeenCalledWith('IMOEX', 'share', {
+      signal: expect.any(AbortSignal),
+    })
+    expect(optionCalcApi.getOptionBoard).toHaveBeenCalled()
+    expect(wrapper!.get('select').exists()).toBe(true)
+    const futureButton = wrapper!.findAll('button').find((button) => button.text() === 'Фьючерс')!
+    expect(futureButton.attributes('disabled')).toBeUndefined()
+    await futureButton.trigger('click')
+    await flushPromises()
+    expect(wrapper!.get('h2').text()).toBe('MIX')
+    expect(wrapper!.text()).toContain('MXZ6')
+    expect(futures).not.toHaveBeenCalledWith('IMOEX', undefined, expect.anything())
+  })
+
+  it('uses MIX rather than IMOEX when the index future is selected', async () => {
+    search.mockImplementation(async (needle) =>
+      needle === 'MIX'
+        ? [{ asset_code: 'MIX', title: 'MIX', asset_type: 'futures' }]
+        : [{ asset_code: 'IMOEX', title: 'IMOEX', asset_type: 'share', asset_subtype: 'index' }],
+    )
+    futures.mockResolvedValue([{ futures_code: 'MXZ6', expiration_date: '2099-12-17' }])
+    await query('IMOEX')
+    await wrapper!
+      .findAll('.asset-results button')
+      .find((button) => button.text().includes('MIX'))!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper!.get('h2').text()).toBe('MIX')
+    expect(futures).not.toHaveBeenCalledWith('IMOEX', undefined, expect.anything())
+    expect(wrapper!.text()).toContain('MXZ6')
+  })
+
   it.each(['index', 'commodity'] as const)(
     'does not offer a %s underlying as a share position',
     async (subtype) => {
@@ -77,8 +145,11 @@ describe('composer cancellation', () => {
       await query('DIRECT')
       await wrapper!.get('.asset-results button').trigger('click')
       await flushPromises()
-      const button = wrapper!.findAll('button').find((button) => button.text() === 'Акция')!
-      expect(button.attributes('disabled')).toBeDefined()
+      expect(wrapper!.findAll('button').some((button) => button.text() === 'Акция')).toBe(false)
+      const button = wrapper!
+        .findAll('button')
+        .find((button) => button.text() === (subtype === 'index' ? 'Индекс' : 'Металл'))!
+      expect(button.attributes('disabled') !== undefined).toBe(subtype === 'index')
     },
   )
   it('does not label wide spreads and one-sided offers as theoretical-only', async () => {

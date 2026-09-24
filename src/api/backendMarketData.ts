@@ -5,6 +5,7 @@ import type {
   AssetType,
   Future,
   InstrumentSpecification,
+  LinearInstrumentType,
   MarketPrice,
   OptionBoard,
   ValuationContext,
@@ -73,8 +74,13 @@ export async function resolveBoardMarketPrice(
 export async function resolveInstrumentMarketPrice(
   secid: string,
   options?: ApiRequestOptions,
+  type?: LinearInstrumentType,
 ): Promise<MarketPrice> {
-  if (appConfig.backend !== 'rust') return getMarketPrice(secid, options)
+  if (appConfig.backend !== 'rust') {
+    if (type === 'commodity' || type === 'currency')
+      return getInstrumentSpecification(secid, type, options)
+    return getMarketPrice(secid, options)
+  }
   const instrument = await optionCalcApi.getInstrument(secid, options)
   const market = futureMarketPrice({ ...instrument, futures_code: instrument.secid })
   if (!market) throw new Error(`Бэкенд не прислал текущую цену инструмента ${secid}`)
@@ -99,14 +105,14 @@ export async function resolveFutureMarketPrice(
 export async function resolveLinearSpecification(
   assetCode: string,
   secid: string,
-  type: 'futures' | 'share',
+  type: LinearInstrumentType,
   options?: ApiRequestOptions,
 ): Promise<InstrumentSpecification> {
-  if (type === 'share' && appConfig.backend !== 'rust')
+  if (type !== 'futures' && appConfig.backend !== 'rust')
     return getInstrumentSpecification(secid, type, options)
 
   const futures =
-    type === 'share'
+    type !== 'futures'
       ? [
           await optionCalcApi
             .getInstrument(secid, options)

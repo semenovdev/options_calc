@@ -25,7 +25,7 @@ export interface Strategy {
   id: string
   name: string
   assetCode: string
-  assetType: AssetType
+  assetType: AssetType | null
   positions: Position[]
   calculationDate: string
   volatilityShift: number

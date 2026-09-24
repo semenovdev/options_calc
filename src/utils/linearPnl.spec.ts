@@ -5,7 +5,7 @@ import type { Position } from '@/types/portfolio'
 
 import { addLinearPositionsToGraph, linearPnl, type LinearPosition } from './linearPnl'
 
-function item(type: 'futures' | 'share', overrides: Partial<Position> = {}): LinearPosition {
+function item(type: Position['type'], overrides: Partial<Position> = {}): LinearPosition {
   const position: Position = {
     id: 'position-1',
     secid: 'TEST',
@@ -33,6 +33,23 @@ describe('linear P&L', () => {
 
   it('treats share quantity as a number of shares', () => {
     expect(linearPnl(item('share'), 110)).toBe(20)
+  })
+
+  it.each([
+    ['commodity', 1],
+    ['commodity', 100],
+    ['currency', 1000],
+  ] as const)('uses the actual %s lot of %s units for P&L and delta', (type, lotSize) => {
+    const position = item(type)
+    position.specification = {
+      ...position.specification,
+      lotSize,
+      minStep: 0.01,
+      stepPrice: 0.01 * lotSize,
+    }
+    expect(linearPnl(position, 110)).toBe(20 * lotSize)
+    const graph = addLinearPositionsToGraph(undefined, [position], 'delta', 100)
+    expect(graph.now.every((point) => point.value === 2 * lotSize)).toBe(true)
   })
 
   it('adds a linear component to every graph point', () => {

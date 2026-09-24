@@ -3,7 +3,7 @@ import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
-import { getMarketPrice } from '@/api/iss'
+import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
 import type {
   CalculatedPortfolio,
@@ -96,6 +96,53 @@ afterEach(() => {
 })
 
 describe('lazy portfolio calculations', () => {
+  it.each([
+    ['GLDRUB_TOM', 'commodity', 1],
+    ['SLVRUB_TOM', 'commodity', 100],
+    ['CNYRUB_TOM', 'currency', 1000],
+  ] as const)(
+    'includes the %s underlying in portfolio and graph calculations',
+    async (secid, type, lotSize) => {
+      const store = populatedStore()
+      store.activeStrategy!.assetCode = secid
+      store.activeStrategy!.assetType = 'share'
+      store.activeStrategy!.positions[0]!.underlyingFutureCode = undefined
+      store.addPosition({ secid, type, quantity: 2, price: 100, nettedIm: true })
+      const valuation_context = { ...context, underlying_secid: secid, underlying_price: 110 }
+      calculate.mockResolvedValue({ ...portfolio(), valuation_context })
+      getGraph.mockResolvedValue({
+        now: [{ underlying_price: 110, value: 10 }],
+        on_expiration: [{ underlying_price: 110, value: 10 }],
+        valuation_context,
+      })
+      vi.mocked(getInstrumentSpecification).mockResolvedValue({
+        secid,
+        price: 110,
+        source: 'MIDPOINT',
+        minStep: 0.01,
+        stepPrice: 0.01 * lotSize,
+        lotSize,
+      })
+      await store.calculate()
+      expect(calculate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          positions: expect.arrayContaining([expect.objectContaining({ secid, type })]),
+        }),
+        expect.anything(),
+      )
+      expect(store.calculation.portfolio?.positions).toHaveLength(2)
+      expect(store.calculation.portfolio?.total.profit_and_loss).toBe(10 + 20 * lotSize)
+      expect(store.calculation.graphs.profit_and_loss?.now[0]?.value).toBe(10 + 20 * lotSize)
+    },
+  )
+  it('creates the initial and subsequent strategy without a selected underlying', () => {
+    const store = usePortfolioStore()
+    expect(store.activeStrategy).toMatchObject({ assetCode: '', assetType: null, positions: [] })
+    store.addStrategy()
+    expect(store.activeStrategy).toMatchObject({ assetCode: '', assetType: null, positions: [] })
+    expect(calculate).not.toHaveBeenCalled()
+  })
+
   it('starts only portfolio and the selected profile graph, using Rust spot without board/ISS', async () => {
     const store = populatedStore()
     const pendingPortfolio = deferred<CalculatedPortfolio>()

@@ -1,5 +1,6 @@
 export type AssetType = 'commodity' | 'currency' | 'futures' | 'index' | 'share'
 export type InstrumentType = 'currency' | 'commodity' | 'futures' | 'option' | 'share'
+export type LinearInstrumentType = Exclude<InstrumentType, 'option'>
 export type IndicatorType = 'profit_and_loss' | 'delta' | 'gamma' | 'vega' | 'theta' | 'rho'
 export type OptionType = 'call' | 'put'
 

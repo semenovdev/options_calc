@@ -19,6 +19,52 @@ function issResponse(
 }
 
 describe('MOEX ISS prices', () => {
+  it.each([
+    ['GLDRUB_TOM', 'commodity', 0.5, 1],
+    ['SLVRUB_TOM', 'commodity', 0.05, 100],
+    ['CNYRUB_TOM', 'currency', 0.0005, 1000],
+  ] as const)(
+    'loads %s spot specifications in legacy MOEX mode',
+    async (secid, type, minStep, lotSize) => {
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          issResponse(
+            [{ SECID: secid, BID: 100, OFFER: 102 }],
+            [{ SECID: secid, MINSTEP: minStep, LOTSIZE: lotSize }],
+          ),
+        )
+      vi.stubGlobal('fetch', fetch)
+      await expect(getInstrumentSpecification(secid, type)).resolves.toMatchObject({
+        secid,
+        price: 101,
+        minStep,
+        lotSize,
+        stepPrice: minStep * lotSize,
+      })
+      expect(fetch.mock.calls[0]?.[0]).toContain(
+        `/engines/currency/markets/selt/boards/CETS/securities/${secid}.json`,
+      )
+    },
+  )
+
+  it.each([0, -1, null])('rejects invalid spot lot size %s', async (lotSize) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          issResponse(
+            [{ SECID: 'GLDRUB_TOM', BID: 100, OFFER: 102 }],
+            [{ SECID: 'GLDRUB_TOM', MINSTEP: 0.5, LOTSIZE: lotSize }],
+          ),
+        ),
+    )
+    await expect(getInstrumentSpecification('GLDRUB_TOM', 'commodity')).rejects.toThrow(
+      'MOEX не прислал спецификацию инструмента GLDRUB_TOM',
+    )
+  })
+
   it('uses the midpoint when both sides of the order book are available', async () => {
     vi.stubGlobal(
       'fetch',

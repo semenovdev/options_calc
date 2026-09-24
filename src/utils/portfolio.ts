@@ -6,12 +6,15 @@ export function toPortfolioRequest(
   strategy: Strategy,
   positions = strategy.positions,
 ): PortfolioRequest {
+  if (positions.length && (!strategy.assetCode || !strategy.assetType)) {
+    throw new Error('Выберите базовый актив стратегии')
+  }
   const deltaSigma = strategy.volatilityShift || undefined
   const calculationDate = strategy.calculationDate || (deltaSigma ? todayMoscow() : undefined)
 
   return {
     asset_code: strategy.assetCode,
-    asset_type: strategy.assetType,
+    asset_type: strategy.assetType ?? undefined,
     positions: positions.map((position) => ({
       secid: position.secid,
       type: position.type,

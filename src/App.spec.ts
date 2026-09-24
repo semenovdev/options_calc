@@ -22,6 +22,8 @@ beforeEach(() => {
   pinia = createPinia()
   setActivePinia(pinia)
   const store = usePortfolioStore()
+  store.activeStrategy!.assetCode = 'SI'
+  store.activeStrategy!.assetType = 'futures'
   store.addPosition({ secid: 'SI-CALL', type: 'option', price: 100, quantity: 1, nettedIm: true })
   vi.mocked(optionCalcApi.calculatePortfolio).mockResolvedValue({
     positions: [],
@@ -56,6 +58,13 @@ function render() {
 }
 
 describe('application calculation lifecycle', () => {
+  it('does not show an asset badge for a new strategy', () => {
+    const store = usePortfolioStore()
+    store.addStrategy()
+    render()
+    expect(wrapper!.find('.asset-badge').exists()).toBe(false)
+  })
+
   it('recalculates a populated strategy on mount and switching back from an empty strategy', async () => {
     const store = usePortfolioStore()
     const firstId = store.activeId

@@ -24,6 +24,28 @@ import {
 const FUTURES_SEARCH_ALIASES: Record<string, string[]> = {
   SBER: ['SBRF'],
   СБЕР: ['SBRF'],
+  IMOEX: ['MIX'],
+  ЗОЛОТО: ['GOLD'],
+  СЕРЕБРО: ['SILV'],
+}
+const DIRECT_FUTURES_ASSET: Record<string, string> = {
+  IMOEX: 'MIX',
+}
+
+function assetClassLabel(value: Asset): string {
+  if (value.asset_type === 'futures') return 'Фьючерс'
+  switch (value.asset_subtype ?? value.asset_type) {
+    case 'index':
+      return 'Индекс'
+    case 'commodity':
+      return 'Товар'
+    case 'currency':
+      return 'Валюта'
+    case 'futures':
+      return 'Фьючерс'
+    case 'share':
+      return 'Акция'
+  }
 }
 
 const props = defineProps<{ useActiveAsset?: boolean }>()
@@ -35,7 +57,7 @@ const query = ref('')
 const assets = ref<Asset[]>([])
 const searchFutures = ref<{ asset: Asset; future: Future }[]>([])
 const asset = ref<Asset | null>(null)
-const instrumentType = ref<Extract<InstrumentType, 'option' | 'futures' | 'share'>>('option')
+const instrumentType = ref<InstrumentType>('option')
 const series = ref<OptionSeries[]>([])
 const selectedSeriesCode = ref('')
 const board = ref<OptionBoardRow[]>([])
@@ -118,10 +140,36 @@ const selectedOption = computed(() =>
 const selectedFuture = computed(() =>
   futures.value.find((item) => item.futures_code === selectedSecid.value),
 )
+const directInstrumentType = computed(() => {
+  if (!asset.value || asset.value.asset_type === 'futures') return null
+  const type = asset.value.asset_subtype ?? asset.value.asset_type
+  return type === 'share' || type === 'commodity' || type === 'currency' ? type : null
+})
+const directInstrumentLabel = computed(() =>
+  directInstrumentType.value === 'commodity'
+    ? 'Металл'
+    : directInstrumentType.value === 'currency'
+      ? 'Валюта'
+      : asset.value?.asset_subtype === 'index' || asset.value?.asset_type === 'index'
+        ? 'Индекс'
+        : 'Акция',
+)
 const constrainedPositions = computed(() => [
   ...(props.useActiveAsset ? (store.activeStrategy?.positions ?? []) : []),
   ...pendingPositions.value,
 ])
+const relatedFutureAsset = computed(() =>
+  assets.value.find(
+    (item) =>
+      item.asset_code === DIRECT_FUTURES_ASSET[asset.value?.asset_code ?? ''] &&
+      item.asset_type === 'futures',
+  ),
+)
+const canSelectFutures = computed(
+  () =>
+    asset.value?.asset_type === 'futures' ||
+    (Boolean(relatedFutureAsset.value) && constrainedPositions.value.length === 0),
+)
 const lockedSeriesCode = computed(
   () => constrainedPositions.value.find((position) => position.optionSeriesCode)?.optionSeriesCode,
 )
@@ -131,13 +179,14 @@ const lockedExpirationDate = computed(
       (position) => position.type === 'option' && position.expirationDate,
     )?.expirationDate,
 )
-const lockedFutureCode = computed(
-  () =>
-    constrainedPositions.value.find((position) => position.underlyingFutureCode)
-      ?.underlyingFutureCode ??
-    constrainedPositions.value.find((position) => position.type === 'futures')?.secid ??
-    selectedSeries.value?.futures_code ??
-    undefined,
+const lockedFutureCode = computed(() =>
+  asset.value?.asset_type === 'futures'
+    ? (constrainedPositions.value.find((position) => position.underlyingFutureCode)
+        ?.underlyingFutureCode ??
+      constrainedPositions.value.find((position) => position.type === 'futures')?.secid ??
+      selectedSeries.value?.futures_code ??
+      undefined)
+    : undefined,
 )
 const canAdd = computed(() =>
   Boolean(
@@ -298,13 +347,29 @@ watch(open, async (isOpen) => {
   }
   reset()
   const strategy = store.activeStrategy
-  if (!props.useActiveAsset || !strategy?.positions.length) return
+  if (!props.useActiveAsset || !strategy?.positions.length || !strategy.assetType) return
 
-  await chooseAsset({
-    asset_code: strategy.assetCode,
-    asset_type: strategy.assetType,
-    title: strategy.positions[0]?.title || strategy.assetCode,
-  })
+  const { requestId, options } = beginInstrumentRequest()
+  loading.value = true
+  try {
+    // The legacy search accepts at most eight characters; resolve the exact identity below.
+    const matches = await optionCalcApi.searchAssets(
+      strategy.assetCode.slice(0, 8),
+      strategy.assetType,
+      options,
+    )
+    if (requestId !== instrumentRequestId || !open.value) return
+    const selected = matches.find(
+      (item) => item.asset_code === strategy.assetCode && item.asset_type === strategy.assetType,
+    )
+    if (!selected) throw new Error(`Бэкенд не вернул базовый актив ${strategy.assetCode}`)
+    await chooseAsset(selected)
+  } catch (reason) {
+    if (requestId !== instrumentRequestId || isAbortError(reason)) return
+    error.value = reason instanceof Error ? reason.message : 'Не удалось загрузить базовый актив'
+  } finally {
+    if (requestId === instrumentRequestId) loading.value = false
+  }
 })
 
 function reset(): void {
@@ -337,12 +402,37 @@ function close(): void {
 }
 
 async function chooseAsset(value: Asset): Promise<void> {
+  if (
+    pendingPositions.value.length &&
+    asset.value &&
+    (asset.value.asset_code !== value.asset_code || asset.value.asset_type !== value.asset_type)
+  ) {
+    error.value = 'В одной стратегии можно использовать только один базовый актив'
+    return
+  }
   cancelSearch()
   clearInstrumentSelection()
   asset.value = value
   step.value = 'instrument'
   instrumentType.value = 'option'
   await loadInstruments(instrumentType.value)
+}
+
+async function chooseFutures(): Promise<void> {
+  if (asset.value?.asset_code && DIRECT_FUTURES_ASSET[asset.value.asset_code]) {
+    if (!relatedFutureAsset.value || constrainedPositions.value.length) return
+    selectingSearchFuture = true
+    try {
+      clearInstrumentSelection()
+      asset.value = relatedFutureAsset.value
+      instrumentType.value = 'futures'
+      await loadInstruments('futures')
+    } finally {
+      selectingSearchFuture = false
+    }
+    return
+  }
+  instrumentType.value = 'futures'
 }
 
 function clearInstrumentSelection(): void {
@@ -413,11 +503,13 @@ async function loadInstruments(type: typeof instrumentType.value): Promise<void>
       futures.value = lockedFutureCode.value
         ? result.filter((item) => item.futures_code === lockedFutureCode.value)
         : result
-    } else {
+    } else if (type === directInstrumentType.value) {
       selectedSecid.value = asset.value.asset_code
-      const quote = await resolveInstrumentMarketPrice(asset.value.asset_code, options)
+      const quote = await resolveInstrumentMarketPrice(asset.value.asset_code, options, type)
       if (requestId !== instrumentRequestId) return
       price.value = quote.price ?? undefined
+    } else {
+      throw new Error('Этот базовый актив нельзя добавить как торговую позицию')
     }
   } catch (reason) {
     if (requestId !== instrumentRequestId || isAbortError(reason)) return
@@ -498,7 +590,11 @@ function add(): void {
   const option = selectedOption.value
   const future = selectedFuture.value
   const expirationDate =
-    option?.expiration_date ?? selectedSeries.value?.expiration_date ?? future?.expiration_date
+    instrumentType.value === 'option'
+      ? (option?.expiration_date ?? selectedSeries.value?.expiration_date)
+      : instrumentType.value === 'futures'
+        ? future?.expiration_date
+        : undefined
   if (
     instrumentType.value === 'option' &&
     lockedExpirationDate.value &&
@@ -523,14 +619,16 @@ function add(): void {
     nettedIm: true,
     expirationDate,
     optionSeriesCode: option ? selectedSeries.value?.optionseries_code : undefined,
-    underlyingFutureCode: option
-      ? (selectedSeries.value?.futures_code ?? undefined)
-      : future?.futures_code,
+    underlyingFutureCode:
+      option && asset.value.asset_type === 'futures'
+        ? (selectedSeries.value?.futures_code ?? undefined)
+        : future?.futures_code,
     strike: option?.strike,
     optionType: option?.option_type,
     title: asset.value.title,
   })
-  selectedSecid.value = instrumentType.value === 'share' ? asset.value.asset_code : ''
+  selectedSecid.value =
+    instrumentType.value === directInstrumentType.value ? asset.value.asset_code : ''
   price.value = undefined
 }
 
@@ -598,11 +696,15 @@ onBeforeUnmount(cancelRequests)
                 >
               </button>
               <div v-if="assets.length" class="search-result-group">Базовые активы</div>
-              <button v-for="item in assets" :key="item.asset_code" @click="chooseAsset(item)">
+              <button
+                v-for="item in assets"
+                :key="`${item.asset_type}:${item.asset_code}`"
+                @click="chooseAsset(item)"
+              >
                 <span class="result-code">{{ item.asset_code }}</span>
                 <span
                   ><strong>{{ item.title }}</strong
-                  ><small>{{ item.asset_type }}</small></span
+                  ><small>{{ assetClassLabel(item) }}</small></span
                 >
               </button>
               <div
@@ -624,19 +726,17 @@ onBeforeUnmount(cancelRequests)
               </button>
               <button
                 :class="{ active: instrumentType === 'futures' }"
-                @click="instrumentType = 'futures'"
+                :disabled="!canSelectFutures"
+                @click="chooseFutures"
               >
                 Фьючерс
               </button>
               <button
-                :class="{ active: instrumentType === 'share' }"
-                :disabled="
-                  asset?.asset_type !== 'share' ||
-                  (!!asset.asset_subtype && asset.asset_subtype !== 'share')
-                "
-                @click="instrumentType = 'share'"
+                :class="{ active: instrumentType === directInstrumentType }"
+                :disabled="!directInstrumentType"
+                @click="directInstrumentType && (instrumentType = directInstrumentType)"
               >
-                Акция
+                {{ directInstrumentLabel }}
               </button>
             </div>
 
@@ -784,7 +884,11 @@ onBeforeUnmount(cancelRequests)
 
             <div class="order-fields">
               <label class="field-label"
-                >Количество<input v-model.number="quantity" type="number" step="1"
+                >{{
+                  instrumentType === 'commodity' || instrumentType === 'currency'
+                    ? 'Количество лотов'
+                    : 'Количество'
+                }}<input v-model.number="quantity" type="number" step="1"
               /></label>
               <label class="field-label"
                 >Цена входа<input

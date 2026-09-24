@@ -64,8 +64,8 @@ function initialStrategy(): Strategy {
   return {
     id: createId('strategy'),
     name: 'Новая стратегия',
-    assetCode: 'SBER',
-    assetType: 'share',
+    assetCode: '',
+    assetType: null,
     positions: [],
     calculationDate: todayMoscow(),
     volatilityShift: 0,
@@ -202,10 +202,13 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     selectedPositions: Position[],
     signal: AbortSignal,
   ): Promise<PreparedCalculation> {
+    if (!strategy.assetCode || !strategy.assetType) {
+      throw new Error('Выберите базовый актив стратегии')
+    }
     const optionPositions = selectedPositions.filter((position) => position.type === 'option')
     const linearPositions = selectedPositions.filter(
-      (position): position is Position & { type: 'futures' | 'share' } =>
-        position.type === 'futures' || position.type === 'share',
+      (position): position is Position & { type: 'futures' | 'share' | 'commodity' | 'currency' } =>
+        position.type !== 'option',
     )
     const options = { signal }
     const optionPayload = toPortfolioRequest(strategy, optionPositions)

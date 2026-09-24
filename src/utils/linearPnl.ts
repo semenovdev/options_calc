@@ -7,9 +7,9 @@ export interface LinearPosition {
 }
 
 export function linearMultiplier(item: LinearPosition): number {
-  return item.position.type === 'futures'
-    ? item.specification.stepPrice / item.specification.minStep
-    : 1
+  return item.position.type === 'share'
+    ? 1
+    : item.specification.stepPrice / item.specification.minStep
 }
 
 export function linearPnl(item: LinearPosition, marketPrice: number): number {

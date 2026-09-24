@@ -109,7 +109,9 @@ onBeforeUnmount(() => {
                 class="strategy-name"
                 aria-label="Название стратегии"
               />
-              <span class="asset-badge">{{ store.activeStrategy?.assetCode }}</span>
+              <span v-if="store.activeStrategy?.assetCode" class="asset-badge">{{
+                store.activeStrategy.assetCode
+              }}</span>
             </div>
           </div>
           <button
