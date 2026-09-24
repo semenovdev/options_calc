@@ -10,6 +10,7 @@ export class MoexApiError extends Error {
 }
 
 export interface RequestOptions extends RequestInit {
+  onResponseHeaders?: (headers: Headers) => void
   retries?: number
   timeoutMs?: number
 }
@@ -46,7 +47,13 @@ function retryAfterMs(value: string | null): number {
 }
 
 export async function requestJson<T>(url: string, options?: RequestOptions): Promise<T> {
-  const { retries = 0, timeoutMs = 30_000, signal: callerSignal, ...init } = options ?? {}
+  const {
+    retries = 0,
+    timeoutMs = 30_000,
+    signal: callerSignal,
+    onResponseHeaders,
+    ...init
+  } = options ?? {}
   callerSignal?.throwIfAborted()
   const controller = new AbortController()
   const abort = () => controller.abort(callerSignal?.reason)
@@ -69,7 +76,10 @@ export async function requestJson<T>(url: string, options?: RequestOptions): Pro
         })
         const body = await response.json().catch(() => null)
         signal.throwIfAborted()
-        if (response.ok) return body as T
+        if (response.ok) {
+          onResponseHeaders?.(response.headers)
+          return body as T
+        }
 
         const apiMessage =
           typeof body === 'object' && body && 'message' in body ? String(body.message) : undefined
@@ -105,6 +115,7 @@ export async function requestJson<T>(url: string, options?: RequestOptions): Pro
 }
 
 interface PendingRequest {
+  responseHeaders?: Headers
   controller: AbortController
   promise: Promise<unknown>
   subscribers: Set<symbol>
@@ -137,7 +148,13 @@ export function requestSharedJson<T>(url: string, options: RequestOptions = {}):
       subscribers: new Set(),
       settled: false,
     }
-    entry.promise = requestJson<T>(url, { ...options, signal: controller.signal }).finally(() => {
+    entry.promise = requestJson<T>(url, {
+      ...options,
+      signal: controller.signal,
+      onResponseHeaders: (headers) => {
+        entry.responseHeaders = headers
+      },
+    }).finally(() => {
       entry.settled = true
       if (pendingRequests.get(key) === entry) pendingRequests.delete(key)
     })
@@ -164,6 +181,14 @@ export function requestSharedJson<T>(url: string, options: RequestOptions = {}):
     entry.promise.then(
       (value) => {
         finish()
+        if (!options.signal?.aborted && entry.responseHeaders) {
+          try {
+            options.onResponseHeaders?.(entry.responseHeaders)
+          } catch (error) {
+            reject(error)
+            return
+          }
+        }
         resolve(value as T)
       },
       (error: unknown) => {

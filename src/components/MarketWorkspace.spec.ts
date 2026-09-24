@@ -102,12 +102,19 @@ describe('workspace request boundaries', () => {
   })
 
   it('loads only the smile on its tab and only the board on liquidity', async () => {
+    getSmile.mockImplementation(async (_asset, _series, _type, options) => {
+      options?.onValuationMode?.('settlement')
+      return points
+    })
     render()
     await tab('Улыбка IV')
     expect(getSeries).toHaveBeenCalledTimes(1)
     expect(getSmile).toHaveBeenCalledWith('SI', 'SI-A', 'futures', {
       signal: expect.any(AbortSignal),
+      onValuationMode: expect.any(Function),
     })
+    await flushPromises()
+    expect(wrapper!.find('.smile-source').text()).toBe('Улыбка — расчётные цены')
     expect(getBoard).not.toHaveBeenCalled()
     expect(wrapper!.find('[data-testid="smile-chart"]').exists()).toBe(true)
     expect(wrapper!.findComponent(Chart).props('option').series[0].data).toEqual([

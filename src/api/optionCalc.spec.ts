@@ -92,6 +92,25 @@ describe('optionCalcApi', () => {
     expect(first).toEqual(second)
   })
 
+  it.each(['market', 'settlement', null])(
+    'delivers smile context %s to every subscriber',
+    async (mode) => {
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (mode) headers.set('x-valuation-mode', mode)
+      const fetchMock = vi.fn(async () => new Response('[]', { headers }))
+      vi.stubGlobal('fetch', fetchMock)
+      const first = vi.fn()
+      const second = vi.fn()
+      await Promise.all([
+        optionCalcApi.getVolatilityGraph('SI', 'SERIES', 'futures', { onValuationMode: first }),
+        optionCalcApi.getVolatilityGraph('SI', 'SERIES', 'futures', { onValuationMode: second }),
+      ])
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(first).toHaveBeenCalledWith(mode)
+      expect(second).toHaveBeenCalledWith(mode)
+    },
+  )
+
   it.each(['board', 'futures', 'series', 'smile'] as const)(
     'shares overlapping %s reads and refreshes on the next call',
     async (kind) => {

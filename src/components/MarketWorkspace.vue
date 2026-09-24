@@ -41,6 +41,14 @@ const series = ref<OptionSeries[]>([])
 const selectedSeriesCode = ref('')
 const board = ref<OptionBoardRow[]>([])
 const smile = ref<VolatilityPoint[]>([])
+const smileMode = ref<string | null>(null)
+const smileSource = computed(() =>
+  smileMode.value === 'market'
+    ? 'Улыбка — рынок'
+    : smileMode.value === 'settlement'
+      ? 'Улыбка — расчётные цены'
+      : 'Улыбка — источник не указан',
+)
 const loadingMarket = ref(false)
 const marketError = ref<string | null>(null)
 let seriesController: globalThis.AbortController | undefined
@@ -360,6 +368,7 @@ async function loadSeriesData(): Promise<void> {
   marketError.value = null
   board.value = []
   smile.value = []
+  smileMode.value = null
   try {
     const options = { signal: controller.signal }
     if (tab === 'smile') {
@@ -367,7 +376,12 @@ async function loadSeriesData(): Promise<void> {
         strategy.assetCode,
         seriesCode,
         strategy.assetType,
-        options,
+        {
+          ...options,
+          onValuationMode: (mode) => {
+            if (!controller.signal.aborted && dataController === controller) smileMode.value = mode
+          },
+        },
       )
       if (controller.signal.aborted || dataController !== controller) return
       if (!result.length) throw new Error('backend returned an empty graph')
@@ -527,6 +541,7 @@ onBeforeUnmount(() => {
       <LoaderCircle :size="28" class="spinning" /><strong>Загрузка…</strong>
     </div>
     <template v-else-if="activeTab === 'smile'">
+      <div v-if="smile.length" class="smile-source">{{ smileSource }}</div>
       <div v-if="smile.length" class="chart-frame" data-testid="smile-chart">
         <VChart :option="smileOption" autoresize />
       </div>

@@ -82,11 +82,15 @@ export const optionCalcApi = {
     assetCode: string,
     seriesCode: string,
     assetType?: AssetType,
-    options?: ApiRequestOptions,
+    options?: ApiRequestOptions & { onValuationMode?: (mode: string | null) => void },
   ) {
     return requestSharedJson<VolatilityPoint[]>(
       `${appConfig.optionCalcBaseUrl}/assets/${encodeURIComponent(assetCode)}/optionseries/${encodeURIComponent(seriesCode)}/volatility_graph${queryString({ asset_type: assetType })}`,
-      { ...options, retries: 2 },
+      {
+        signal: options?.signal,
+        retries: 2,
+        onResponseHeaders: (headers) => options?.onValuationMode?.(headers.get('x-valuation-mode')),
+      },
     )
   },
 
