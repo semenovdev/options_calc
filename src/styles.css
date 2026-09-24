@@ -1062,7 +1062,7 @@ th {
     monospace;
 }
 .strike-list button {
-  min-height: 56px;
+  min-height: 100px;
 }
 .spot-divider {
   position: relative;
@@ -1142,6 +1142,18 @@ th {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 3px 10px;
+}
+.quote.option-prices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 10px;
+  min-width: 0;
+}
+.option-prices .reference-price {
+  grid-column: 1 / -1;
+}
+.option-prices .quote-value small {
+  white-space: normal;
 }
 .quote-value {
   display: flex;
@@ -1339,6 +1351,28 @@ th {
   }
 }
 @media (max-width: 480px) {
+  .strike-list button {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr);
+    padding-right: 24px;
+  }
+  .strike-list .strike-primary {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .strike-list .liquidity-mark {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .strike-list .option-prices {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+  .strike-list button > svg {
+    position: absolute;
+    right: 4px;
+    top: 12px;
+  }
   .topbar {
     height: 54px;
   }

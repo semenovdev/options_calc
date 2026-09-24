@@ -1,5 +1,30 @@
 import type { IndicatorPoint, OptionBoardRow } from '@/types/moex'
 
+export function optionReferencePrice(option: OptionBoardRow): {
+  price: number | null
+  label: string
+} {
+  const valid = (price: number | null | undefined): price is number =>
+    price != null && Number.isFinite(price) && price >= 0
+  if (valid(option.settlement_price)) {
+    return { price: option.settlement_price, label: 'Расчёт (поставщик)' }
+  }
+  // The official legacy board exposes its supplied calculation as theorprice.
+  if (!('model_price' in option) && !('settlement_price' in option)) {
+    return {
+      price: valid(option.theorprice) ? option.theorprice : null,
+      label: 'Расчёт (поставщик)',
+    }
+  }
+  const label =
+    option.underlying_source === 'market'
+      ? 'Модельная (рынок)'
+      : option.underlying_source === 'settlement'
+        ? 'Модельная (клиринг)'
+        : 'Модельная'
+  return { price: valid(option.model_price) ? option.model_price : null, label }
+}
+
 export function optionSpreadPercent(option: OptionBoardRow): number | null {
   if (!option.bid || !option.offer || option.bid <= 0 || option.offer <= 0) return null
   return ((option.offer - option.bid) / ((option.offer + option.bid) / 2)) * 100

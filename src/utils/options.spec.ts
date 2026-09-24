@@ -7,6 +7,7 @@ import {
   isLiquidOption,
   niceAxisStep,
   optionMarketPrice,
+  optionReferencePrice,
   optionsAroundPrice,
   optionsBySpot,
   profitLossIntervals,
@@ -15,6 +16,42 @@ import {
 } from './options'
 
 describe('option helpers', () => {
+  it('labels supplied and model prices without concealing their source', () => {
+    const row = { secid: 'GZ11250BJ6A', strike: 11250 }
+    expect(
+      optionReferencePrice({
+        ...row,
+        settlement_price: 63,
+        model_price: 50,
+        underlying_source: 'market',
+      }),
+    ).toEqual({ price: 63, label: 'Расчёт (поставщик)' })
+    expect(
+      optionReferencePrice({
+        ...row,
+        settlement_price: null,
+        model_price: 50,
+        underlying_source: 'market',
+      }),
+    ).toEqual({ price: 50, label: 'Модельная (рынок)' })
+    expect(
+      optionReferencePrice({
+        ...row,
+        settlement_price: null,
+        model_price: 52,
+        underlying_source: 'settlement',
+      }),
+    ).toEqual({ price: 52, label: 'Модельная (клиринг)' })
+    expect(optionReferencePrice({ ...row, theorprice: 60 })).toEqual({
+      price: 60,
+      label: 'Расчёт (поставщик)',
+    })
+    expect(
+      optionReferencePrice({ ...row, settlement_price: null, model_price: null, theorprice: 99 })
+        .price,
+    ).toBeNull()
+    expect(optionReferencePrice({ ...row, settlement_price: 0, model_price: 50 }).price).toBe(0)
+  })
   it('accepts only options with a tradable two-sided spread', () => {
     expect(isLiquidOption({ secid: 'LIQUID', strike: 100, bid: 9, offer: 11 })).toBe(true)
     expect(isLiquidOption({ secid: 'WIDE', strike: 100, bid: 1, offer: 10 })).toBe(false)

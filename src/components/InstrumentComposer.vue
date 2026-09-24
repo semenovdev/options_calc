@@ -14,9 +14,8 @@ import type { Asset, Future, InstrumentType, OptionBoardRow, OptionSeries } from
 import type { Position } from '@/types/portfolio'
 import { formatNumber, todayMoscow } from '@/utils/format'
 import {
-  hasTheoreticalPrice,
-  isLiquidOption,
   optionMarketPrice,
+  optionReferencePrice,
   optionSpreadPercent,
   optionsBySpot,
   spotDividerPosition,
@@ -88,8 +87,10 @@ function eligibleOptions(side: 'call' | 'put', mode: 'market' | 'theoretical') {
     (item) =>
       item.option_type === side &&
       (mode === 'market'
-        ? optionMarketPrice(item, quantity.value) !== null
-        : hasTheoreticalPrice(item)),
+        ? [item.bid, item.offer, item.last].some(
+            (price) => price != null && Number.isFinite(price) && price > 0,
+          )
+        : optionReferencePrice(item).price !== null),
   )
   return Array.from(new Map(options.map((item) => [item.secid, item])).values())
 }
@@ -469,7 +470,7 @@ function futuresSearchAliases(value: string): string[] {
 function selectedOptionPrice(option: OptionBoardRow): number | null {
   return optionPriceMode.value === 'market'
     ? optionMarketPrice(option, quantity.value)
-    : (option.theorprice ?? null)
+    : optionReferencePrice(option).price
 }
 
 async function scrollToAtm(): Promise<void> {
@@ -480,9 +481,16 @@ async function scrollToAtm(): Promise<void> {
 }
 
 function liquidityText(option: OptionBoardRow): string {
-  if (!isLiquidOption(option)) return 'Только расчётная цена'
   const spread = optionSpreadPercent(option)
-  return spread === null ? 'Нет котировок' : `Спред ${formatNumber(spread)}%`
+  if (spread !== null) {
+    return spread < 0 ? 'Пересечённый стакан' : `Спред ${formatNumber(spread)}%`
+  }
+  if (optionMarketPrice(option, 1) !== null) return 'Только OFFER'
+  if (optionMarketPrice(option, -1) !== null) return 'Только BID'
+  if (option.last != null && Number.isFinite(option.last) && option.last > 0) {
+    return 'Последняя сделка, нет BID/OFFER'
+  }
+  return optionReferencePrice(option).price !== null ? 'Только расчётная цена' : 'Нет котировок'
 }
 
 function add(): void {
@@ -703,18 +711,20 @@ onBeforeUnmount(cancelRequests)
                       :class="{ theoretical: optionPriceMode === 'theoretical' }"
                     >
                       <i></i>
-                      <small>{{
-                        optionPriceMode === 'market' ? liquidityText(item) : 'Расчёт MOEX'
-                      }}</small>
+                      <small>{{ liquidityText(item) }}</small>
                     </span>
-                    <span class="quote" :class="{ comparison: optionPriceMode === 'market' }">
-                      <span v-if="optionPriceMode === 'market'" class="quote-value">
-                        <small>Рынок</small>
-                        <strong>{{ formatNumber(optionMarketPrice(item, quantity)) }}</strong>
+                    <span class="quote option-prices">
+                      <span class="quote-value">
+                        <small>BID</small>
+                        <strong>{{ formatNumber(optionMarketPrice(item, -1)) }}</strong>
                       </span>
                       <span class="quote-value">
-                        <small>Расчёт</small>
-                        <strong>{{ formatNumber(item.theorprice) }}</strong>
+                        <small>OFFER</small>
+                        <strong>{{ formatNumber(optionMarketPrice(item, 1)) }}</strong>
+                      </span>
+                      <span class="quote-value reference-price">
+                        <small>{{ optionReferencePrice(item).label }}</small>
+                        <strong>{{ formatNumber(optionReferencePrice(item).price) }}</strong>
                       </span>
                       <small class="quote-iv">IV {{ formatNumber(item.volatility) }}%</small>
                     </span>

@@ -59,6 +59,9 @@ export interface OptionBoardRow {
   expiration_date?: string
   theorprice?: number | null
   theorprice_rub?: number | null
+  settlement_price?: number | null
+  model_price?: number | null
+  underlying_source?: string | null
   last?: number | null
   offer?: number | null
   bid?: number | null

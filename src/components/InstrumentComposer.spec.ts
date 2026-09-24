@@ -34,6 +34,7 @@ function deferred<T>() {
 let pinia: Pinia
 let wrapper: VueWrapper | undefined
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn()
   localStorage.clear()
   vi.resetAllMocks()
   vi.useFakeTimers()
@@ -62,6 +63,60 @@ async function query(value: string) {
 }
 
 describe('composer cancellation', () => {
+  it('does not label wide spreads and one-sided offers as theoretical-only', async () => {
+    search.mockResolvedValue([asset('GAZR')])
+    vi.mocked(optionCalcApi.getSeries).mockResolvedValue([
+      {
+        optionseries_code: 'GAZR-test',
+        asset_code: 'GAZR',
+        asset_type: 'futures',
+        expiration_date: '2099-09-30',
+        futures_code: 'GZZ6',
+      },
+    ])
+    vi.mocked(optionCalcApi.getOptionBoard).mockResolvedValue({
+      valuationContext: {
+        mode: 'market',
+        underlying_price: 10510.5,
+        underlying_secid: 'GZZ6',
+        as_of: '2026-09-24T15:00:00Z',
+      },
+      rows: [
+        {
+          secid: 'GZ11000BJ6A',
+          option_type: 'call',
+          strike: 11000,
+          bid: 10,
+          offer: 90,
+          theorprice: 50,
+        },
+        {
+          secid: 'GZ11250BJ6A',
+          option_type: 'call',
+          strike: 11250,
+          bid: null,
+          offer: 93,
+          theorprice: null,
+          model_price: null,
+          settlement_price: 63,
+          underlying_source: 'market',
+        },
+      ],
+    })
+    await query('GAZR')
+    await wrapper!.get('.asset-results button').trigger('click')
+    await flushPromises()
+    expect(wrapper!.text()).toContain('Спред 160%')
+    expect(wrapper!.text()).toContain('Только OFFER')
+    expect(wrapper!.text()).not.toContain('Только расчётная цена')
+    expect(wrapper!.text()).toContain('93')
+    const row = wrapper!
+      .findAll('.strike-list button')
+      .find((item) => item.text().includes('GZ11250BJ6A'))!
+    expect(row.get('.reference-price').text()).toContain('Расчёт (поставщик)')
+    expect(row.get('.reference-price strong').text()).toBe('63')
+  })
+
   it('does not fetch futures for every result of a broad search', async () => {
     search.mockResolvedValue([asset('SI'), asset('SBRF'), asset('SNGP')])
     await query('S')
