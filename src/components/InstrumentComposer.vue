@@ -878,8 +878,17 @@ onBeforeUnmount(cancelRequests)
               </button>
             </div>
 
-            <div v-else class="selected-share">
-              <Check :size="18" /> {{ asset?.asset_code }} · {{ asset?.title }}
+            <div v-else class="future-picker">
+              <div class="option-list futures-list">
+                <div class="selected-share">
+                  <span class="future-contract">
+                    <strong>{{ asset?.asset_code }}</strong>
+                    <small v-if="asset?.title !== asset?.asset_code">{{ asset?.title }}</small>
+                  </span>
+                  <span class="future-selected">Выбран · {{ formatNumber(price) }}</span>
+                  <Check :size="16" />
+                </div>
+              </div>
             </div>
 
             <div class="order-fields">
