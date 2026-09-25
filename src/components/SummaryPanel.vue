@@ -57,6 +57,7 @@ const totals = computed(() => store.calculation.portfolio?.total)
           v-if="store.activeStrategy"
           v-model="store.activeStrategy.calculationDate"
           type="date"
+          :disabled="!!store.activeExpiredPositions.length"
         />
       </label>
       <label class="field-label"
@@ -66,11 +67,12 @@ const totals = computed(() => store.calculation.portfolio?.total)
           v-model.number="store.activeStrategy.volatilityShift"
           type="number"
           step="0.5"
+          :disabled="!!store.activeExpiredPositions.length"
         />
       </label>
       <button
         class="secondary-button full"
-        :disabled="!store.activeStrategy?.positions.length"
+        :disabled="!store.activeStrategy?.positions.length || !!store.activeExpiredPositions.length"
         @click="store.calculate"
       >
         Применить сценарий

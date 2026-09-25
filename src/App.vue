@@ -108,6 +108,7 @@ onBeforeUnmount(() => {
                 v-model="store.activeStrategy.name"
                 class="strategy-name"
                 aria-label="Название стратегии"
+                :disabled="!!store.activeExpiredPositions.length"
               />
               <span v-if="store.activeStrategy?.assetCode" class="asset-badge">{{
                 store.activeStrategy.assetCode
@@ -116,7 +117,9 @@ onBeforeUnmount(() => {
           </div>
           <button
             class="secondary-button"
-            :disabled="!hasPositions || store.calculation.loading"
+            :disabled="
+              !hasPositions || !!store.activeExpiredPositions.length || store.calculation.loading
+            "
             @click="store.calculate"
           >
             <RefreshCw :size="15" :class="{ spinning: store.calculation.loading }" />
@@ -124,7 +127,10 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="store.calculation.error" class="error-banner" role="alert">
+        <div v-if="store.activeExpiredPositions.length" class="expired-banner" role="status">
+          В стратегии есть истёкшие инструменты. Удалите их, чтобы снова рассчитывать портфель.
+        </div>
+        <div v-else-if="store.calculation.error" class="error-banner" role="alert">
           {{ store.calculation.error }}
         </div>
 

@@ -1,11 +1,10 @@
-# Third-party licenses
+# Лицензии сторонних зависимостей
 
-The application intentionally uses only open-source dependencies. No trial, evaluation,
-source-available, or commercially licensed UI/charting package is included.
+Приложение использует только зависимости с открытыми лицензиями. Пробных, оценочных, доступных только для чтения исходников или коммерческих библиотек интерфейса и графиков нет.
 
-## Runtime dependencies
+## Зависимости приложения
 
-| Package | License |
+| Пакет | Лицензия |
 | --- | --- |
 | Vue | MIT |
 | Pinia | MIT |
@@ -14,5 +13,4 @@ source-available, or commercially licensed UI/charting package is included.
 | vue-echarts | MIT |
 | @lucide/vue | ISC |
 
-Development dependencies use MIT, ISC, or Apache-2.0 licenses. The exact resolved tree is
-recorded in `package-lock.json`; it can be audited with `npm query ':attr(license, [MIT ISC Apache-2.0 BSD-2-Clause BSD-3-Clause])'` and `npm audit`.
+Зависимости для разработки используют MIT, ISC или Apache-2.0. Точное дерево закреплено в `package-lock.json`. Его можно проверить командами `npm query ':attr(license, [MIT ISC Apache-2.0 BSD-2-Clause BSD-3-Clause])'` и `npm audit`.

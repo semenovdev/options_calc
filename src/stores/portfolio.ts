@@ -22,7 +22,13 @@ import {
   linearPnl,
   type LinearPosition,
 } from '@/utils/linearPnl'
-import { createId, mergePosition, toPortfolioRequest } from '@/utils/portfolio'
+import {
+  createId,
+  hasExpiredPositions,
+  isExpiredPosition,
+  mergePosition,
+  toPortfolioRequest,
+} from '@/utils/portfolio'
 
 const STORAGE_KEY = 'moex-options-workbench:v1'
 const indicatorLabels: Record<IndicatorType, string> = {
@@ -104,6 +110,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   const restored = restore()
   const strategies = ref<Strategy[]>(restored.strategies)
   const activeId = ref(restored.activeId)
+  const currentDate = ref(todayMoscow())
   const focusedPositionId = ref<string | null>(null)
   const selectedIndicator = ref<IndicatorType>('profit_and_loss')
   const profileVisible = ref(true)
@@ -122,6 +129,12 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   )
   const focusedPosition = computed(() =>
     activeStrategy.value?.positions.find((position) => position.id === focusedPositionId.value),
+  )
+  const activeExpiredPositions = computed(
+    () =>
+      activeStrategy.value?.positions.filter((position) =>
+        isExpiredPosition(position, currentDate.value),
+      ) ?? [],
   )
 
   watch(
@@ -168,7 +181,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
 
   function addPosition(position: Omit<Position, 'id'>): void {
     const strategy = activeStrategy.value
-    if (!strategy) return
+    if (!strategy || hasExpiredPositions(strategy, currentDate.value)) return
     focusedPositionId.value = null
     const existingIndex = strategy.positions.findIndex(
       (item) => item.secid === position.secid && item.type === position.type,
@@ -185,7 +198,8 @@ export const usePortfolioStore = defineStore('portfolio', () => {
 
   function updatePosition(id: string, patch: Partial<Position>): void {
     const position = activeStrategy.value?.positions.find((item) => item.id === id)
-    if (position) Object.assign(position, patch)
+    if (!position || isExpiredPosition(position) || activeExpiredPositions.value.length) return
+    Object.assign(position, patch)
     resetCalculation()
   }
 
@@ -349,8 +363,14 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   }
 
   async function calculate(): Promise<void> {
+    currentDate.value = todayMoscow()
     const active = activeStrategy.value
     if (!active?.positions.length) return
+    if (hasExpiredPositions(active, currentDate.value)) {
+      resetCalculation()
+      active.marketPrice = null
+      return
+    }
     const selectedPositions = (
       focusedPosition.value ? [focusedPosition.value] : active.positions
     ).map((position) => ({ ...position }))
@@ -396,9 +416,11 @@ export const usePortfolioStore = defineStore('portfolio', () => {
   return {
     strategies,
     activeId,
+    currentDate,
     activeStrategy,
     focusedPositionId,
     focusedPosition,
+    activeExpiredPositions,
     selectedIndicator,
     profileVisible,
     calculation,

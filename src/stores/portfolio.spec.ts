@@ -96,6 +96,43 @@ afterEach(() => {
 })
 
 describe('lazy portfolio calculations', () => {
+  it('keeps an expired strategy without requesting P&L, then calculates after removal', async () => {
+    const store = populatedStore()
+    const expiredId = store.activeStrategy!.positions[0]!.id
+    store.activeStrategy!.positions[0]!.expirationDate = '2000-01-01'
+    store.addPosition({ secid: 'OTHER', type: 'option', quantity: 1, price: 10, nettedIm: true })
+    expect(store.activeStrategy!.positions).toHaveLength(1)
+    expect(store.activeExpiredPositions.map((position) => position.secid)).toEqual(['Si86000CALL'])
+    store.updatePosition(expiredId, { price: 999 })
+    expect(store.activeStrategy!.positions[0]!.price).toBe(300)
+    await store.calculate()
+    expect(calculate).not.toHaveBeenCalled()
+    expect(getGraph).not.toHaveBeenCalled()
+    expect(store.calculation.portfolio).toBeNull()
+    expect(store.calculation.error).toBeNull()
+
+    store.removePosition(expiredId)
+    store.addPosition({
+      secid: 'Si87000CALL',
+      type: 'option',
+      quantity: 1,
+      price: 10,
+      nettedIm: true,
+      expirationDate: '2999-01-01',
+    })
+    await store.calculate()
+    expect(calculate).toHaveBeenCalled()
+    expect(store.activeExpiredPositions).toHaveLength(0)
+  })
+
+  it('does not classify a missing SECID without an expiration date as expired', async () => {
+    const store = populatedStore()
+    calculate.mockRejectedValue(new Error('instrument, asset or series not found'))
+    await store.calculate()
+    expect(store.activeExpiredPositions).toHaveLength(0)
+    expect(store.calculation.error).toContain('instrument, asset or series not found')
+  })
+
   it('prepends new strategies, selects them and persists their order', async () => {
     const store = usePortfolioStore()
     const firstId = store.activeId

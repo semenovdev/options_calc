@@ -169,6 +169,13 @@ select:focus-visible {
   background: var(--panel-2);
   border-color: var(--border-strong);
 }
+.strategy-item.expired .strategy-code,
+.strategy-item.expired .strategy-meta strong {
+  color: var(--muted);
+}
+.strategy-item.expired.active::before {
+  background: var(--muted);
+}
 .strategy-item.active::before {
   content: '';
   position: absolute;
@@ -200,6 +207,10 @@ select:focus-visible {
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
+}
+.strategy-meta .expired-label,
+.positions-table td .expired-label {
+  color: #aeb5bf;
 }
 .delete-strategy {
   opacity: 0;
@@ -360,6 +371,15 @@ select:focus-visible {
   margin-bottom: 14px;
   padding: 10px 12px;
 }
+.expired-banner {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--muted);
+  background: var(--panel-2);
+  font-size: 12px;
+}
 .inline-error {
   margin: 12px 16px;
   padding: 8px 10px;
@@ -425,6 +445,14 @@ th {
 .positions-table tbody tr.focused {
   background: rgba(69, 210, 164, 0.07);
   box-shadow: inset 2px 0 var(--green);
+}
+.positions-table tbody tr.expired {
+  cursor: default;
+  background: rgba(255, 255, 255, 0.012);
+}
+.positions-table tbody tr.expired td,
+.positions-table tbody tr.expired td strong {
+  color: var(--muted);
 }
 .positions-table td {
   color: #cdd4dd;

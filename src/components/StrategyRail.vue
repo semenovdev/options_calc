@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Plus, Trash2 } from '@lucide/vue'
 import { usePortfolioStore } from '@/stores/portfolio'
+import { hasExpiredPositions } from '@/utils/portfolio'
 
 const store = usePortfolioStore()
 </script>
@@ -18,13 +19,19 @@ const store = usePortfolioStore()
         v-for="strategy in store.strategies"
         :key="strategy.id"
         class="strategy-item"
-        :class="{ active: strategy.id === store.activeId }"
+        :class="{
+          active: strategy.id === store.activeId,
+          expired: hasExpiredPositions(strategy, store.currentDate),
+        }"
         @click="store.selectStrategy(strategy.id)"
       >
         <span class="strategy-meta">
           <span v-if="strategy.assetCode" class="strategy-code">{{ strategy.assetCode }}</span>
           <strong :title="strategy.name">{{ strategy.name }}</strong>
           <small>{{ strategy.positions.length }} позиций</small>
+          <small v-if="hasExpiredPositions(strategy, store.currentDate)" class="expired-label"
+            >Есть истёкшие</small
+          >
         </span>
         <span
           v-if="store.strategies.length > 1"

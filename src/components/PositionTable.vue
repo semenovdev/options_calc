@@ -4,6 +4,7 @@ import { Plus, Trash2 } from '@lucide/vue'
 
 import { usePortfolioStore } from '@/stores/portfolio'
 import { formatNumber } from '@/utils/format'
+import { isExpiredPosition } from '@/utils/portfolio'
 
 defineEmits<{ add: [] }>()
 const store = usePortfolioStore()
@@ -32,15 +33,24 @@ function positionVolatility(secid: string): number | null | undefined {
 }
 
 function focusPosition(id: string): void {
+  if (store.activeExpiredPositions.length) return
   store.focusedPositionId = store.focusedPositionId === id ? null : id
   void store.calculate()
 }
 
 function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis.Event): void {
+  if (store.activeExpiredPositions.length) return
   const value = Number((event.target as globalThis.HTMLInputElement).value)
   if (!Number.isFinite(value)) return
   store.updatePosition(id, { [field]: value })
   void store.calculate()
+}
+
+function removePosition(id: string): void {
+  store.removePosition(id)
+  if (store.activeStrategy?.positions.length && !store.activeExpiredPositions.length) {
+    void store.calculate()
+  }
 }
 </script>
 
@@ -51,7 +61,12 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
         <h2>Позиции</h2>
         <span>Клик по строке изолирует позицию на графиках</span>
       </div>
-      <button v-if="positions.length" class="text-button" @click="$emit('add')">
+      <button
+        v-if="positions.length"
+        class="text-button"
+        :disabled="!!store.activeExpiredPositions.length"
+        @click="$emit('add')"
+      >
         <Plus :size="14" /> Добавить
       </button>
     </div>
@@ -74,7 +89,10 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
           <tr
             v-for="position in positions"
             :key="position.id"
-            :class="{ focused: store.focusedPositionId === position.id }"
+            :class="{
+              focused: store.focusedPositionId === position.id,
+              expired: isExpiredPosition(position, store.currentDate),
+            }"
             @click="focusPosition(position.id)"
           >
             <td>
@@ -82,6 +100,9 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
               <small v-if="position.strike">
                 {{ formatNumber(position.strike) }} · {{ position.optionType?.toUpperCase() }}
               </small>
+              <small v-if="isExpiredPosition(position, store.currentDate)" class="expired-label"
+                >Истёк</small
+              >
             </td>
             <td>
               <span class="type-chip">{{ typeLabel(position.type) }}</span>
@@ -92,6 +113,7 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
                 class="cell-input quantity"
                 type="number"
                 :value="position.quantity"
+                :disabled="!!store.activeExpiredPositions.length"
                 @click.stop
                 @change="updateNumber(position.id, 'quantity', $event)"
               />
@@ -102,6 +124,7 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
                 type="number"
                 step="any"
                 :value="position.price"
+                :disabled="!!store.activeExpiredPositions.length"
                 @click.stop
                 @change="updateNumber(position.id, 'price', $event)"
               />
@@ -120,7 +143,7 @@ function updateNumber(id: string, field: 'quantity' | 'price', event: globalThis
               <button
                 class="icon-button small danger"
                 title="Удалить позицию"
-                @click.stop="store.removePosition(position.id)"
+                @click.stop="removePosition(position.id)"
               >
                 <Trash2 :size="14" />
               </button>

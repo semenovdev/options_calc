@@ -41,6 +41,14 @@ export function clonePosition(position: Position): Position {
   return { ...position, id: createId('position') }
 }
 
+export function isExpiredPosition(position: Position, today = todayMoscow()): boolean {
+  return Boolean(position.expirationDate && position.expirationDate < today)
+}
+
+export function hasExpiredPositions(strategy: Strategy, today = todayMoscow()): boolean {
+  return strategy.positions.some((position) => isExpiredPosition(position, today))
+}
+
 function weightedValue(
   current: number | undefined,
   currentQuantity: number,
