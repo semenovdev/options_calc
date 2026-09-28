@@ -94,6 +94,44 @@ async function tab(label: string) {
 }
 
 describe('workspace request boundaries', () => {
+  it('renders expiry-only data without a fabricated current line or legend item', async () => {
+    const store = usePortfolioStore()
+    store.activeStrategy!.marketPrice = 86000
+    store.calculation.graphs.profit_and_loss = {
+      now: [],
+      on_expiration: [
+        { underlying_price: 85000, value: -300 },
+        { underlying_price: 87000, value: 700 },
+      ],
+      warnings: [{ code: 'MODEL_DATA_UNAVAILABLE', message: 'IV unavailable' }],
+    }
+    store.calculation.graphWarnings.profit_and_loss = 'Показан доступный расчёт на экспирацию.'
+    render()
+    await flushPromises()
+    expect(wrapper!.find('[data-testid="profile-chart"]').exists()).toBe(true)
+    expect(wrapper!.get('.warning-banner').text()).toContain('экспирацию')
+    const option = wrapper!.findComponent(Chart).props('option')
+    expect(option.legend.data).toEqual(['На экспирацию'])
+    expect(option.series.some((series: { name: string }) => series.name === 'Сейчас')).toBe(false)
+  })
+
+  it('replaces the initial empty state with an availability warning for missing quotes', async () => {
+    const store = usePortfolioStore()
+    store.calculation.warning = 'Сейчас недостаточно котировок для расчёта.'
+    render()
+    expect(wrapper!.get('.availability-warning[role="status"]').text()).toContain(
+      'График пока недоступен',
+    )
+    expect(wrapper!.text()).not.toContain('Добавьте позиции')
+    store.calculation.warning = null
+    store.calculation.graphWarnings.profit_and_loss = 'Сейчас недостаточно котировок для расчёта.'
+    await flushPromises()
+    expect(wrapper!.get('.availability-warning').text()).toContain('котировок')
+    store.calculation.graphWarnings = {}
+    await flushPromises()
+    expect(wrapper!.find('.availability-warning').exists()).toBe(false)
+  })
+
   it.each(['rust', 'legacy'])('shows a warning for insufficient %s smile data', async (backend) => {
     if (backend === 'rust')
       getSmile.mockRejectedValueOnce(

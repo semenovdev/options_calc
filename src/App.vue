@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Activity, Download, FileJson, Plus, RefreshCw, Wifi } from '@lucide/vue'
+import { Activity, Download, FileJson, Plus, RefreshCw, TriangleAlert, Wifi } from '@lucide/vue'
 
 import InstrumentComposer from '@/components/InstrumentComposer.vue'
 import MarketWorkspace from '@/components/MarketWorkspace.vue'
@@ -132,6 +132,10 @@ onBeforeUnmount(() => {
         </div>
         <div v-else-if="store.calculation.error" class="error-banner" role="alert">
           {{ store.calculation.error }}
+        </div>
+        <div v-else-if="store.calculation.warning" class="warning-banner" role="status">
+          <TriangleAlert :size="16" aria-hidden="true" />
+          <span>{{ store.calculation.warning }}</span>
         </div>
 
         <PositionTable @add="openComposer(hasPositions)" />

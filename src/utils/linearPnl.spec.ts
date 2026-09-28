@@ -60,7 +60,21 @@ describe('linear P&L', () => {
       110,
     )
     expect(graph.now[0]?.value).toBe(45)
-    expect(graph.on_expiration).toHaveLength(121)
+    expect(graph.on_expiration).toEqual([])
+  })
+
+  it('does not substitute a linear-only curve for missing option analytics', () => {
+    const warnings = [{ code: 'MODEL_DATA_UNAVAILABLE', message: 'IV unavailable' }]
+    const graph = addLinearPositionsToGraph(
+      { now: [], on_expiration: [{ underlying_price: 110, value: 5 }], on_what_if: [], warnings },
+      [item('share')],
+      'profit_and_loss',
+      110,
+    )
+    expect(graph.now).toEqual([])
+    expect(graph.on_what_if).toEqual([])
+    expect(graph.on_expiration[0]?.value).toBe(25)
+    expect(graph.warnings).toEqual(warnings)
   })
 
   it('tilts an option P&L profile after adding a futures hedge', () => {

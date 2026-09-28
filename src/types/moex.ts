@@ -150,7 +150,14 @@ export interface PortfolioTotals {
   fee?: number | null
 }
 
+export interface CalculationWarning {
+  code: string
+  secid?: string
+  message: string
+}
+
 export interface CalculatedPortfolio {
+  warnings?: CalculationWarning[]
   positions: CalculatedPosition[]
   total: PortfolioTotals
   initial_margin?: number | null
@@ -163,6 +170,7 @@ export interface IndicatorPoint {
 }
 
 export interface IndicatorGraph {
+  warnings?: CalculationWarning[]
   now: IndicatorPoint[]
   on_expiration: IndicatorPoint[]
   on_what_if?: IndicatorPoint[] | null

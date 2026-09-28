@@ -3,6 +3,7 @@ import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { optionCalcApi } from '@/api/optionCalc'
+import { MoexApiError } from '@/api/http'
 import { usePortfolioStore } from '@/stores/portfolio'
 import App from './App.vue'
 
@@ -19,6 +20,7 @@ let wrapper: VueWrapper | undefined
 beforeEach(() => {
   localStorage.clear()
   vi.resetAllMocks()
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
   pinia = createPinia()
   setActivePinia(pinia)
   const store = usePortfolioStore()
@@ -39,6 +41,7 @@ afterEach(() => {
   wrapper?.unmount()
   wrapper = undefined
   disposePinia(pinia)
+  vi.restoreAllMocks()
 })
 
 function render() {
@@ -58,6 +61,24 @@ function render() {
 }
 
 describe('application calculation lifecycle', () => {
+  it('shows missing quotes as a status warning, not an error, and clears it after recovery', async () => {
+    vi.mocked(optionCalcApi.calculatePortfolio).mockRejectedValueOnce(
+      new MoexApiError(
+        'Neither market nor settlement valuation context is complete: market: missing market price for S2170CX6; settlement: missing settlement price for SLVRUB_TOM',
+        503,
+        { code: 'LIVE_DATA_UNAVAILABLE' },
+      ),
+    )
+    render()
+    await flushPromises()
+    expect(wrapper!.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper!.get('.warning-banner[role="status"]').text()).toContain('котировок')
+    expect(wrapper!.text()).not.toContain('Neither market')
+    await usePortfolioStore().calculate()
+    await flushPromises()
+    expect(wrapper!.find('.warning-banner').exists()).toBe(false)
+  })
+
   it('does not show an asset badge for a new strategy', () => {
     const store = usePortfolioStore()
     store.addStrategy()

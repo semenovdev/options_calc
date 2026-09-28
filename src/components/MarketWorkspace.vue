@@ -193,9 +193,11 @@ const profileOption = computed<EChartsOption>(() => {
     },
     legend: {
       ...(baseChartStyle.legend as object),
-      data: scenarioPoints.length
-        ? ['Сейчас', 'На экспирацию', 'Сценарий']
-        : ['Сейчас', 'На экспирацию'],
+      data: [
+        ...(nowPoints.length ? ['Сейчас'] : []),
+        ...(expirationPoints.length ? ['На экспирацию'] : []),
+        ...(scenarioPoints.length ? ['Сценарий'] : []),
+      ],
       selected: { Сценарий: scenarioVisible.value },
     },
     yAxis: {
@@ -227,18 +229,22 @@ const profileOption = computed<EChartsOption>(() => {
             })),
           )
         : []),
-      {
-        name: 'Сейчас',
-        type: 'line',
-        showSymbol: false,
-        smooth: 0.16,
-        data: chartData(nowPoints),
-        lineStyle: { width: 2, color: '#45d2a4' },
-        itemStyle: { color: '#45d2a4' },
-        tooltip: { valueFormatter: tooltipValueFormatter },
-        z: 2,
-      },
-      ...(indicator.value === 'profit_and_loss'
+      ...(nowPoints.length
+        ? [
+            {
+              name: 'Сейчас',
+              type: 'line' as const,
+              showSymbol: false,
+              smooth: 0.16,
+              data: chartData(nowPoints),
+              lineStyle: { width: 2, color: '#45d2a4' },
+              itemStyle: { color: '#45d2a4' },
+              tooltip: { valueFormatter: tooltipValueFormatter },
+              z: 2,
+            },
+          ]
+        : []),
+      ...(indicator.value === 'profit_and_loss' && nowPoints.length
         ? [
             {
               name: 'Сейчас',
@@ -549,7 +555,17 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <div
-        v-if="store.activeStrategy?.marketPrice != null && currentGraph?.now.length"
+        v-if="currentGraph && store.calculation.graphWarnings[indicator]"
+        class="warning-banner"
+        role="status"
+      >
+        {{ store.calculation.graphWarnings[indicator] }}
+      </div>
+      <div
+        v-if="
+          store.activeStrategy?.marketPrice != null &&
+          (currentGraph?.now.length || currentGraph?.on_expiration.length)
+        "
         class="chart-frame"
         data-testid="profile-chart"
       >
@@ -560,6 +576,17 @@ onBeforeUnmount(() => {
         class="chart-empty"
       >
         <LoaderCircle :size="28" class="spinning" /><strong>Расчёт…</strong>
+      </div>
+      <div
+        v-else-if="store.calculation.warning || store.calculation.graphWarnings[indicator]"
+        class="chart-empty availability-warning"
+        role="status"
+      >
+        <TriangleAlert :size="28" />
+        <strong>График пока недоступен</strong>
+        <span>{{
+          store.calculation.graphWarnings[indicator] ?? 'Недостаточно рыночных данных.'
+        }}</span>
       </div>
       <div v-else class="chart-empty">
         <LineChartIcon :size="28" />

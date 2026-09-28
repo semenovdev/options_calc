@@ -35,7 +35,7 @@ export function addLinearPositionsToGraph(
   spot: number,
 ): IndicatorGraph {
   const adjust = (points: IndicatorPoint[] | null | undefined): IndicatorPoint[] => {
-    const source = points?.length ? points : grid(spot)
+    const source = graph ? (points ?? []) : grid(spot)
     return source.map((point) => ({
       ...point,
       value:
@@ -49,6 +49,7 @@ export function addLinearPositionsToGraph(
     }))
   }
   return {
+    ...(graph?.warnings ? { warnings: graph.warnings } : {}),
     ...(graph?.valuation_context !== undefined
       ? { valuation_context: graph.valuation_context }
       : {}),

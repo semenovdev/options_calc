@@ -7,6 +7,12 @@ import {
   valuationMarketPrice,
 } from '@/api/backendMarketData'
 import { isAbortError } from '@/api/http'
+import {
+  hasModelWarning,
+  marketDataWarning,
+  partialGraphWarning,
+  partialPortfolioWarning,
+} from '@/api/availability'
 import { optionCalcApi } from '@/api/optionCalc'
 import type {
   CalculatedPortfolio,
@@ -45,7 +51,8 @@ function graphValidationError(graph: IndicatorGraph | null | undefined): string 
   for (const series of ['now', 'on_expiration'] as const) {
     const points = graph[series]
     if (!Array.isArray(points)) return `backend returned an invalid ${series} series`
-    if (!points.length) return `backend returned an empty ${series} series`
+    if (!points.length && !(series === 'now' && hasModelWarning(graph.warnings)))
+      return `backend returned an empty ${series} series`
     const invalidIndex = points.findIndex(
       (point) =>
         !point || !Number.isFinite(point.underlying_price) || !Number.isFinite(point.value),
@@ -118,8 +125,10 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     portfolio: null,
     graphs: {},
     graphLoading: {},
+    graphWarnings: {},
     loading: false,
     error: null,
+    warning: null,
     calculatedAt: null,
   })
   let currentRun: CalculationRun | undefined
@@ -153,8 +162,10 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     calculation.portfolio = null
     calculation.graphs = {}
     calculation.graphLoading = {}
+    calculation.graphWarnings = {}
     calculation.loading = false
     calculation.error = null
+    calculation.warning = null
     calculation.calculatedAt = null
   }
 
@@ -286,6 +297,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       spot: market.price,
       linear,
       portfolio: {
+        warnings: [...(optionPortfolio?.warnings ?? []), ...(fullPortfolio?.warnings ?? [])],
         positions: [
           ...(optionPortfolio?.positions ?? []),
           ...linear.map(({ position, specification }) => ({
@@ -319,6 +331,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     const pending = run.graphs.get(indicator)
     if (pending) return pending
     calculation.graphLoading[indicator] = true
+    delete calculation.graphWarnings[indicator]
     const request = (async () => {
       const [graphResult, contextResult] = await Promise.allSettled([
         run.payload.positions.length
@@ -336,10 +349,19 @@ export const usePortfolioStore = defineStore('portfolio', () => {
         return
       if (graphResult.status === 'rejected') {
         if (!isAbortError(graphResult.reason)) {
-          globalThis.console.error(
-            `[MOEX Options] ${indicatorLabels[indicator]} chart error:`,
-            graphResult.reason,
-          )
+          const warning = marketDataWarning(graphResult.reason)
+          if (warning) {
+            calculation.graphWarnings[indicator] = warning
+            globalThis.console.warn(
+              `[MOEX Options] ${indicatorLabels[indicator]} chart warning:`,
+              graphResult.reason,
+            )
+          } else {
+            globalThis.console.error(
+              `[MOEX Options] ${indicatorLabels[indicator]} chart error:`,
+              graphResult.reason,
+            )
+          }
         }
         return
       }
@@ -353,6 +375,13 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       }
       const { linear, spot } = contextResult.value
       const graph = addLinearPositionsToGraph(graphResult.value, linear, indicator, spot)
+      if (hasModelWarning(graph.warnings)) {
+        calculation.graphWarnings[indicator] = partialGraphWarning
+        globalThis.console.warn(
+          `[MOEX Options] ${indicatorLabels[indicator]} chart warning:`,
+          graph.warnings,
+        )
+      }
       calculation.graphs[indicator] = graph
     })().finally(() => {
       run.graphs.delete(indicator)
@@ -398,10 +427,20 @@ export const usePortfolioStore = defineStore('portfolio', () => {
       if (currentRun !== run) return
       active.marketPrice = prepared.spot
       calculation.portfolio = prepared.portfolio
+      if (hasModelWarning(prepared.portfolio.warnings)) {
+        calculation.warning = partialPortfolioWarning
+        globalThis.console.warn('[MOEX Options] Portfolio warning:', prepared.portfolio.warnings)
+      }
       calculation.calculatedAt = new Date().toISOString()
     } catch (error) {
       if (currentRun !== run || isAbortError(error)) return
-      calculation.error = error instanceof Error ? error.message : 'Не удалось рассчитать портфель'
+      calculation.warning = marketDataWarning(error)
+      if (calculation.warning) {
+        globalThis.console.warn('[MOEX Options] Portfolio warning:', error)
+      } else {
+        calculation.error =
+          error instanceof Error ? error.message : 'Не удалось рассчитать портфель'
+      }
       controller.abort()
     } finally {
       if (currentRun === run) calculation.loading = false

@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 
 import { getInstrumentSpecification, getMarketPrice } from '@/api/iss'
 import { optionCalcApi } from '@/api/optionCalc'
+import { MoexApiError } from '@/api/http'
 import type {
   CalculatedPortfolio,
   IndicatorGraph,
@@ -89,6 +90,7 @@ beforeEach(() => {
   calculate.mockImplementation(async () => portfolio())
   getGraph.mockImplementation(async () => graph())
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 afterEach(() => {
   disposePinia(pinia)
@@ -96,6 +98,90 @@ afterEach(() => {
 })
 
 describe('lazy portfolio calculations', () => {
+  it('preserves quoted P&L and expiry while warning about unavailable model analytics', async () => {
+    const warnings = [
+      { code: 'MODEL_DATA_UNAVAILABLE', secid: 'Si86000CALL', message: 'IV_PRICE_BOUNDS' },
+    ]
+    calculate.mockResolvedValueOnce({
+      ...portfolio(),
+      warnings,
+      initial_margin: null,
+      total: { profit_and_loss: -119.1, profit_and_loss_rub: -119.1, delta: null },
+    })
+    getGraph.mockResolvedValueOnce({ ...graph(), now: [], on_what_if: [], warnings })
+    const store = populatedStore()
+    await store.calculate()
+    expect(store.calculation.portfolio?.total.profit_and_loss_rub).toBe(-119.1)
+    expect(store.calculation.portfolio?.total.delta).toBeNull()
+    expect(store.calculation.error).toBeNull()
+    expect(store.calculation.warning).toContain('P&L рассчитан')
+    expect(store.calculation.graphs.profit_and_loss?.now).toEqual([])
+    expect(store.calculation.graphs.profit_and_loss?.on_expiration).toHaveLength(3)
+    expect(store.calculation.graphWarnings.profit_and_loss).toContain('экспирацию')
+    expect(console.error).not.toHaveBeenCalled()
+    await store.calculate()
+    expect(store.calculation.warning).toBeNull()
+    expect(store.calculation.graphWarnings).toEqual({})
+  })
+
+  const unavailable = () =>
+    new MoexApiError(
+      'Neither market nor settlement valuation context is complete: market: missing market price for S2170CX6; settlement: missing settlement price for SLVRUB_TOM',
+      503,
+      { code: 'LIVE_DATA_UNAVAILABLE', retryable: true },
+    )
+
+  it('clears old values and warns for absent quotes, then recovers on recalculation', async () => {
+    const store = populatedStore()
+    await store.calculate()
+    expect(store.calculation.portfolio).not.toBeNull()
+    calculate.mockRejectedValueOnce(unavailable())
+    getGraph.mockRejectedValueOnce(unavailable())
+    await store.calculate()
+    expect(store.calculation.error).toBeNull()
+    expect(store.calculation.warning).toContain('котировок')
+    expect(store.calculation.portfolio).toBeNull()
+    expect(store.calculation.graphs).toEqual({})
+    expect(store.activeStrategy!.marketPrice).toBeNull()
+    expect(console.error).not.toHaveBeenCalled()
+    expect(console.warn).toHaveBeenCalledWith(
+      '[MOEX Options] Portfolio warning:',
+      expect.any(MoexApiError),
+    )
+    await store.calculate()
+    expect(store.calculation.warning).toBeNull()
+    expect(store.calculation.portfolio).not.toBeNull()
+    expect(store.calculation.graphs.profit_and_loss).toBeDefined()
+  })
+
+  it('keeps the successful portfolio when only the graph lacks quotes', async () => {
+    const store = populatedStore()
+    getGraph.mockRejectedValueOnce(unavailable())
+    await store.calculate()
+    expect(store.calculation.portfolio).not.toBeNull()
+    expect(store.calculation.error).toBeNull()
+    expect(store.calculation.warning).toBeNull()
+    expect(store.calculation.graphWarnings.profit_and_loss).toContain('котировок')
+    expect(console.error).not.toHaveBeenCalled()
+    expect(console.warn).toHaveBeenCalledWith(
+      '[MOEX Options] PnL chart warning:',
+      expect.any(MoexApiError),
+    )
+    await store.loadGraph('profit_and_loss')
+    expect(store.calculation.graphWarnings.profit_and_loss).toBeUndefined()
+    expect(store.calculation.graphs.profit_and_loss).toBeDefined()
+  })
+
+  it('clears unavailable-data warnings on strategy change', async () => {
+    const store = populatedStore()
+    calculate.mockRejectedValueOnce(unavailable())
+    await store.calculate()
+    expect(store.calculation.warning).not.toBeNull()
+    store.addStrategy()
+    expect(store.calculation.warning).toBeNull()
+    expect(store.calculation.graphWarnings).toEqual({})
+  })
+
   it('keeps an expired strategy without requesting P&L, then calculates after removal', async () => {
     const store = populatedStore()
     const expiredId = store.activeStrategy!.positions[0]!.id

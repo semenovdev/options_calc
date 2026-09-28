@@ -37,7 +37,9 @@ export interface CalculationState {
   portfolio: CalculatedPortfolio | null
   graphs: Partial<Record<IndicatorType, IndicatorGraph>>
   graphLoading: Partial<Record<IndicatorType, boolean>>
+  graphWarnings: Partial<Record<IndicatorType, string>>
   loading: boolean
   error: string | null
+  warning: string | null
   calculatedAt: string | null
 }
